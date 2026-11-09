@@ -203,7 +203,11 @@ export async function callPaypal(name, args) {
     return await liveCall(name, args)
   } catch (err) {
     if (!isOutage(err)) throw err
-    // Sandbox unreachable or credentials no longer valid: new checkouts move to the built-in PayPal stand-in.
+    // Only switch for good when the credentials stop working. Network blips and 5xx stay live,
+    // because orders already created in the sandbox cannot be finished on the stand-in.
+    if (!/invalid_client|Client Authentication failed|\b401\b|unauthori[sz]ed/i.test(String(err.message))) {
+      throw new Error('PayPal sandbox did not answer. Please try again in a moment.')
+    }
     degrade('paypal', err)
     if (name === 'create_order') return callPaypal(name, args)
     throw new Error('PayPal sandbox is unavailable right now. New orders use the built-in demo checkout.')

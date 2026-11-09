@@ -18,7 +18,9 @@ export function chatLimiter(req, res, next) {
   }
   const recent = (hitsByIp.get(req.ip) || []).filter((t) => now - t < HOUR_MS)
   if (recent.length >= CHAT_PER_IP_HOUR || dayCount >= CHAT_PER_DAY) {
-    return res.status(429).json({ success: false, message: 'Demo limit reached. Please try again later.' })
+    // Keep the demo usable: the rule-based agent answers without calling the paid model.
+    req.demoLimited = true
+    return next()
   }
   hitsByIp.set(req.ip, [...recent, now])
   dayCount += 1

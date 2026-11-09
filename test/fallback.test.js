@@ -23,3 +23,16 @@ test('paid APIs stop after the hackathon results (2026-12-21 KST)', () => {
   assert.equal(modes.channel3, 'mock')
   Object.assign(modes, saved)
 })
+
+test('over the demo limit the request is marked for the built-in agent instead of being blocked', async () => {
+  const { chatLimiter } = await import('../server/demoLimits.js')
+  let limited = false
+  for (let i = 0; i < 45; i += 1) {
+    const req = { ip: '203.0.113.9' }
+    let passed = false
+    chatLimiter(req, { status: () => ({ json: () => {} }) }, () => { passed = true })
+    assert.equal(passed, true)
+    if (req.demoLimited) limited = true
+  }
+  assert.equal(limited, true)
+})

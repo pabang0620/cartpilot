@@ -82,7 +82,7 @@ api.post('/chat', async (req, res, next) => {
     session.busy = true
     try {
       let result
-      if (modes.llm === 'live') {
+      if (modes.llm === 'live' && !req.demoLimited) {
         const before = session.messages?.length ?? 0
         try {
           result = await runClaudeAgent(session, body.message)
@@ -253,8 +253,10 @@ api.post('/approvals/:id', async (req, res, next) => {
         const local = order.disputes.find((d) => d.disputeId === approval.disputeId)
         if (local) local.status = dispute.status
         else order.disputes.push({ disputeId: approval.disputeId, status: dispute.status, reason: dispute.reason, amount: approval.amount })
-        if (modes.paypal === 'mock' && dispute.dispute_outcome) {
-          order.refunds.push({ refundId: `dispute-${approval.disputeId}`, status: 'COMPLETED', amount: Number(dispute.dispute_outcome.amount_refunded.value), reason: 'Dispute settled', createdAt: new Date().toISOString() })
+        const refundId = `dispute-${approval.disputeId}`
+        if (!order.refunds.some((r) => r.refundId === refundId)) {
+          const refunded = Number(dispute.dispute_outcome?.amount_refunded?.value ?? approval.amount)
+          order.refunds.push({ refundId, status: 'COMPLETED', amount: refunded, reason: 'Claim settled', createdAt: new Date().toISOString() })
         }
         approval.result = { status: dispute.status }
       }

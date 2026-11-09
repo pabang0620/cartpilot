@@ -49,6 +49,24 @@ export function settleOrderState(session, order) {
   }
 }
 
+// Mirror PayPal disputes onto the shopper's orders (sandbox disputes are opened outside the app).
+export function syncDisputes(session, disputes) {
+  const byCapture = new Map(sessionOrders(session).filter((o) => o.captureId).map((o) => [o.captureId, o]))
+  for (const d of disputes) {
+    const txn = (d.disputed_transactions || []).find((t) => byCapture.has(t.seller_transaction_id))
+    if (!txn) continue
+    const order = byCapture.get(txn.seller_transaction_id)
+    const amount = Number(d.dispute_amount?.value ?? txn.seller_transaction_amount?.value ?? 0)
+    const local = order.disputes.find((x) => x.disputeId === d.dispute_id)
+    if (local) {
+      local.status = d.status || local.status
+      if (!local.amount && amount) local.amount = amount
+    } else {
+      order.disputes.push({ disputeId: d.dispute_id, status: d.status, reason: d.reason, amount })
+    }
+  }
+}
+
 export function captureIds(session) {
   return new Set(sessionOrders(session).map((o) => o.captureId).filter(Boolean))
 }

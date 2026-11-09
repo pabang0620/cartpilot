@@ -58,7 +58,14 @@ test/                 node:test suites (money guards end to end, fallback rules)
 
 ## For judges
 
-Live demo: https://cartpilot.35-216-2-121.sslip.io. Follow "Try the full story" on the left. The PayPal Sandbox test buyer is shown in the payment dialog. After paying, press "Seller demo: mark as shipped", then ask about the order, a refund and a claim. "Start over" resets the session.
+Live demo: https://cartpilot.35-216-2-121.sslip.io
+
+1. Click step 1 of "Try the full story": `I need two camping chairs for a festival, under $300 total. Light and comfortable.`
+2. Click **Review & pay**, then **Pay with PayPal**. Log in with the PayPal Sandbox test buyer shown in the payment dialog and approve. It is a sandbox account with fake money only, which is why the server exposes it.
+3. Back in the app, click **Seller demo: mark as shipped**, then ask `Where are my chairs?`
+4. Ask `One chair arrived with a broken leg. Refund that one.` and click **Approve refund**.
+5. Ask `The other chair never arrived. Open a claim.` In the Sandbox a buyer opens claims in the PayPal Resolution Center, so the agent drafts the claim text and then follows it with `list_disputes` / `get_dispute`.
+6. **Start over** at the top resets the session.
 
 ## Outage fallback
 
@@ -103,14 +110,6 @@ BASE=http://localhost:3001 npm run smoke
 ```
 
 It runs the whole loop over HTTP: shop, checkout, PayPal approve, capture, ship, track, partial refund, claim, settle, plus guard checks (over-refund, foreign session, double payment).
-
-## Try it (judges)
-
-1. Open the demo and type: `I need two camping chairs for a festival, under $300 total. Light and comfortable.`
-2. Click **Review & pay**, then **Pay with PayPal**. In Sandbox, log in with a PayPal sandbox **personal** account and approve.
-3. Back in the app, click **Seller: simulate shipment** on the order, then ask `Where are my chairs?`
-4. Ask `One chair arrived with a broken leg. Refund that one.` and click **Approve refund**.
-5. Ask `The other chair never arrived. Open a claim.` In Sandbox the agent drafts the claim for the PayPal Resolution Center and follows it with `list_disputes`.
 
 ## Hosting notes
 

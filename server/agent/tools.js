@@ -3,7 +3,7 @@ import { config, modes } from '../config.js'
 import { searchProducts, getProduct, summarizeProduct, bestOffer, offerPrice } from '../integrations/channel3.js'
 import { toolkitSchema, mockPaypal } from '../integrations/paypal.js'
 import { logActivity, sessionOrders, getSessionOrder, addApproval, spentAmount } from '../store.js'
-import { paypal, round2, refundableAmount, captureIds, compactOrder, reservedAmount } from '../services.js'
+import { paypal, round2, refundableAmount, captureIds, compactOrder, reservedAmount, syncDisputes } from '../services.js'
 
 class ToolError extends Error {}
 
@@ -173,8 +173,12 @@ export const TOOLS = [
   }),
   fromToolkit('get_shipment_tracking', async (session, args) => {
     const captures = captureIds(session)
-    if (args.order_id) requireOrder(session, args.order_id)
-    else if (!captures.has(args.transaction_id)) throw new ToolError('Transaction does not belong to this shopper.')
+    if (args.order_id) {
+      const order = requireOrder(session, args.order_id)
+      const { transaction_id: ignored, ...rest } = args
+      return paypal(session, 'get_shipment_tracking', order.captureId ? { ...rest, transaction_id: order.captureId } : rest)
+    }
+    if (!captures.has(args.transaction_id)) throw new ToolError('Transaction does not belong to this shopper.')
     return paypal(session, 'get_shipment_tracking', args)
   }),
   fromToolkit('get_refund', async (session, args) => {
@@ -186,6 +190,7 @@ export const TOOLS = [
     const result = await paypal(session, 'list_disputes', args)
     const captures = captureIds(session)
     const items = (result.items || []).filter((d) => (d.disputed_transactions || []).some((t) => captures.has(t.seller_transaction_id)))
+    syncDisputes(session, items)
     return { items }
   }),
   fromToolkit('get_dispute', async (session, args) => {
@@ -194,6 +199,7 @@ export const TOOLS = [
     if (!(dispute.disputed_transactions || []).some((t) => captures.has(t.seller_transaction_id))) {
       throw new ToolError('Dispute does not belong to this shopper.')
     }
+    syncDisputes(session, [dispute])
     return dispute
   }),
   {
