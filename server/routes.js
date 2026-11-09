@@ -2,8 +2,8 @@ import { Router } from 'express'
 import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { config, modes } from './config.js'
-import { createSession, getSession, getSessionOrder, saveOrder, publicState, logActivity } from './store.js'
-import { paypal, round2, refundableAmount } from './services.js'
+import { createSession, getSession, getSessionOrder, saveOrder, publicState, logActivity, spentAmount } from './store.js'
+import { paypal, round2, refundableAmount, settleOrderState } from './services.js'
 import { approvalLink, captureIdOf } from './integrations/paypal.js'
 import { runClaudeAgent } from './agent/claudeAgent.js'
 import { runMockAgent } from './agent/mockAgent.js'
@@ -60,7 +60,7 @@ api.put('/budget', (req, res, next) => {
     const session = requireSession(body.sessionId)
     if (round2(body.amount) <= 0) throw new HttpError(400, 'amount: must be at least $0.01')
     session.budget = round2(body.amount)
-    if (session.cart && session.cart.status === 'proposed' && session.cart.total > session.budget) {
+    if (session.cart && session.cart.status !== 'paid' && session.cart.total > round2(session.budget - spentAmount(session))) {
       session.cart = { ...session.cart, overBudget: true }
     } else if (session.cart) {
       session.cart = { ...session.cart, overBudget: false }
@@ -99,7 +99,8 @@ api.post('/checkout', async (req, res, next) => {
     if (!cart || cart.id !== body.cartId) throw new HttpError(409, 'Cart changed. Review it again.')
     if (cart.status === 'paid') throw new HttpError(409, 'This cart is already paid.')
     if (session.budget == null) throw new HttpError(400, 'Set a budget cap before paying.')
-    if (cart.total > session.budget) throw new HttpError(400, `Cart total $${cart.total} is over your $${session.budget} cap.`)
+    const left = round2(session.budget - spentAmount(session))
+    if (cart.total > left) throw new HttpError(400, `Cart total $${cart.total} is over the $${left} left in your $${session.budget} cap.`)
     if (session.checkingOut) throw new HttpError(409, 'Checkout is already in progress.')
     session.checkingOut = true
     try {
@@ -167,9 +168,11 @@ api.get('/paypal/return', async (req, res) => {
     logActivity(session, { source: 'app', tool: 'refuse_capture', origin: 'paypal-return', ok: false, detail: 'order no longer matches the cart' })
     return redirectToApp(res, { error: 'This PayPal order no longer matches your cart, so it was not charged. Review the cart and pay again.' })
   }
-  if (session.budget == null || order.total > session.budget) {
+  const left = session.budget == null ? 0 : round2(session.budget - spentAmount(session, order.orderId))
+  if (order.total > left) {
+    order.status = 'ON_HOLD'
     logActivity(session, { source: 'app', tool: 'refuse_capture', origin: 'paypal-return', ok: false, detail: 'over budget cap' })
-    return redirectToApp(res, { error: `Order total $${order.total} is over your $${session.budget} cap, so it was not charged.` })
+    return redirectToApp(res, { error: `Order total $${order.total} is over the $${left} left in your budget cap, so it was not charged. Raise the cap and approve on PayPal again.` })
   }
   try {
     const result = await paypal(session, 'pay_order', { id: order.orderId }, 'paypal-return')
@@ -236,6 +239,7 @@ api.post('/approvals/:id', async (req, res, next) => {
       approval.status = 'failed'
       approval.error = err.message
     }
+    if (order) settleOrderState(session, order)
     res.json({ success: true, data: publicState(session) })
   } catch (err) {
     next(err)

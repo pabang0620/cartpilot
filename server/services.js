@@ -23,6 +23,32 @@ export function refundableAmount(order) {
   return round2(order.total - refundedAmount(order))
 }
 
+const CLOSED_DISPUTE = new Set(['RESOLVED', 'CLOSED'])
+
+// Money already promised on an order but not refunded yet: pending refund cards and open claims.
+export function reservedAmount(session, order) {
+  const pendingRefunds = [...session.approvals.values()]
+    .filter((a) => a.type === 'refund' && a.status === 'pending' && a.orderId === order.orderId)
+    .reduce((s, a) => s + a.amount, 0)
+  const openClaims = order.disputes.filter((d) => !CLOSED_DISPUTE.has(d.status)).reduce((s, d) => s + Number(d.amount || 0), 0)
+  return { pendingRefunds: round2(pendingRefunds), openClaims: round2(openClaims), total: round2(pendingRefunds + openClaims) }
+}
+
+// After money moves: show REFUNDED states and retire approval cards that can no longer succeed.
+export function settleOrderState(session, order) {
+  const refundable = refundableAmount(order)
+  if (order.captureId && order.refunds.some((r) => r.status !== 'FAILED')) {
+    order.status = refundable <= 0 ? 'REFUNDED' : 'PARTIALLY_REFUNDED'
+  }
+  for (const card of session.approvals.values()) {
+    if (card.status !== 'pending' || card.orderId !== order.orderId) continue
+    if (card.amount > refundable) {
+      card.status = 'expired'
+      card.error = refundable <= 0 ? 'Order is already fully refunded.' : `Only $${refundable} is still refundable.`
+    }
+  }
+}
+
 export function captureIds(session) {
   return new Set(sessionOrders(session).map((o) => o.captureId).filter(Boolean))
 }

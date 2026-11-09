@@ -53,7 +53,7 @@ function Order({ order, onShip, busy }) {
         <div key={d.disputeId} className="small">Dispute <code>{d.disputeId}</code> · {d.status}</div>
       ))}
       {refunded > 0 && <div className="small"><strong>Net paid {usd(order.total - refunded)}</strong></div>}
-      {order.captureId && order.trackers.length === 0 && (
+      {order.captureId && order.trackers.length === 0 && order.status !== 'REFUNDED' && (
         <button type="button" className="btn btn--ghost small" disabled={busy} onClick={() => onShip(order.orderId)}>
           Seller: simulate shipment
         </button>

@@ -63,10 +63,22 @@ export function addApproval(session, approval) {
   return item
 }
 
+// Net money already charged in this session (captured orders minus refunds).
+export function spentAmount(session, excludeOrderId = null) {
+  const cents = sessionOrders(session)
+    .filter((o) => o.captureId && o.orderId !== excludeOrderId)
+    .reduce((sum, o) => {
+      const refunded = o.refunds.filter((r) => r.status !== 'FAILED').reduce((s, r) => s + Number(r.amount), 0)
+      return sum + Math.round((o.total - refunded) * 100)
+    }, 0)
+  return cents / 100
+}
+
 export function publicState(session) {
   return {
     sessionId: session.id,
     budget: session.budget,
+    spent: spentAmount(session),
     cart: session.cart,
     orders: sessionOrders(session),
     approvals: [...session.approvals.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),

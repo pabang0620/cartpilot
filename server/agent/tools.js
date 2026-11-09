@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { config, modes } from '../config.js'
 import { searchProducts, getProduct, summarizeProduct, bestOffer, offerPrice } from '../integrations/channel3.js'
 import { toolkitSchema, mockPaypal } from '../integrations/paypal.js'
-import { logActivity, sessionOrders, getSessionOrder, addApproval } from '../store.js'
-import { paypal, round2, refundableAmount, captureIds, compactOrder } from '../services.js'
+import { logActivity, sessionOrders, getSessionOrder, addApproval, spentAmount } from '../store.js'
+import { paypal, round2, refundableAmount, captureIds, compactOrder, reservedAmount } from '../services.js'
 
 class ToolError extends Error {}
 
@@ -67,7 +67,10 @@ export const TOOLS = [
     },
     async run(session, { query, max_price, min_price, limit = 6 }) {
       let maxPrice = max_price
-      if (session.budget != null) maxPrice = Math.min(maxPrice ?? session.budget, session.budget)
+      if (session.budget != null) {
+        const left = Math.max(0, round2(session.budget - spentAmount(session)))
+        maxPrice = Math.min(maxPrice ?? left, left)
+      }
       const products = await searchProducts({ query, minPrice: min_price, maxPrice, limit }, session.id)
       const results = products.map((p) => rememberProduct(session, p)).filter(Boolean)
       return { query, count: results.length, results }
@@ -142,11 +145,14 @@ export const TOOLS = [
       const subtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0))
       const shipping = round2(config.shippingFlat)
       const total = round2(subtotal + shipping)
-      if (session.budget != null && total > session.budget) {
-        throw new ToolError(`Cart total $${total} is over the $${session.budget} budget by $${round2(total - session.budget)}. Choose cheaper items or fewer units.`)
+      const spent = spentAmount(session)
+      const left = session.budget != null ? round2(session.budget - spent) : null
+      if (left != null && total > left) {
+        const already = spent > 0 ? ` ($${spent} of the $${session.budget} cap is already spent)` : ''
+        throw new ToolError(`Cart total $${total} is over the $${left} left in the budget${already} by $${round2(total - left)}. Choose cheaper items or fewer units.`)
       }
       session.cart = { id: randomUUID(), status: 'proposed', items: lines, subtotal, shipping, total, currency: 'USD', summary }
-      return { cart_total_usd: total, subtotal_usd: subtotal, shipping_usd: shipping, budget_usd: session.budget, remaining_budget_usd: session.budget != null ? round2(session.budget - total) : null, next_step: 'Shopper reviews the cart and clicks Review & pay.' }
+      return { cart_total_usd: total, subtotal_usd: subtotal, shipping_usd: shipping, budget_usd: session.budget, already_spent_usd: spent, remaining_budget_usd: left != null ? round2(left - total) : null, next_step: 'Shopper reviews the cart and clicks Review & pay.' }
     },
   },
   {
@@ -155,7 +161,7 @@ export const TOOLS = [
     description: 'List this shopper\'s orders with status, capture id, refunds, tracking and disputes. Call this first for any after-purchase question.',
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
     async run(session) {
-      return { orders: sessionOrders(session).map(compactOrder) }
+      return { orders: sessionOrders(session).filter((o) => o.status !== 'VOIDED').map(compactOrder) }
     },
   },
   fromToolkit('get_order', async (session, args) => {
@@ -206,13 +212,12 @@ export const TOOLS = [
       if (!order.captureId) throw new ToolError('Order is not paid yet, nothing to refund.')
       const refundable = refundableAmount(order)
       if (refundable <= 0) throw new ToolError('This order is already fully refunded.')
-      const pending = round2([...session.approvals.values()]
-        .filter((a) => a.type === 'refund' && a.status === 'pending' && a.orderId === order.orderId)
-        .reduce((sum, a) => sum + a.amount, 0))
-      const available = round2(refundable - pending)
-      if (available <= 0) throw new ToolError(`A refund card for $${pending} is already waiting for the shopper. Ask them to approve or reject it first.`)
+      const reserved = reservedAmount(session, order)
+      const available = round2(refundable - reserved.total)
+      const held = [reserved.pendingRefunds ? `$${reserved.pendingRefunds} in a pending refund card` : '', reserved.openClaims ? `$${reserved.openClaims} in an open claim (resolve the claim instead of refunding twice)` : ''].filter(Boolean).join(' and ')
+      if (available <= 0) throw new ToolError(`Nothing left to refund: ${held}.`)
       const amount = round2(amount_usd ?? available)
-      if (!(amount > 0) || amount > available) throw new ToolError(`Refund must be between $0.01 and $${available}${pending ? ` ($${pending} is already waiting in a pending refund card)` : ''}.`)
+      if (!(amount > 0) || amount > available) throw new ToolError(`Refund must be between $0.01 and $${available}${held ? ` (${held})` : ''}.`)
       const approval = addApproval(session, { type: 'refund', orderId: order.orderId, captureId: order.captureId, amount, reason: reason.slice(0, 200), paypalTool: 'create_refund' })
       return { approval_id: approval.id, status: 'pending_shopper_approval', amount_usd: amount, refundable_usd: refundable }
     },
@@ -237,8 +242,11 @@ export const TOOLS = [
       if (!order.captureId) throw new ToolError('Order is not paid yet.')
       const refundable = refundableAmount(order)
       if (refundable <= 0) throw new ToolError('This order is already fully refunded, there is nothing to claim.')
+      const reserved = reservedAmount(session, order)
+      const available = round2(refundable - reserved.total)
+      if (available <= 0) throw new ToolError(`Nothing left to claim: $${reserved.openClaims} is already in an open claim and $${reserved.pendingRefunds} in pending refund cards.`)
       const amount = round2(amount_usd)
-      if (!(amount > 0) || amount > refundable) throw new ToolError(`Claim amount must be between $0.01 and $${refundable}.`)
+      if (!(amount > 0) || amount > available) throw new ToolError(`Claim amount must be between $0.01 and $${available}.`)
       order.claimDraft = { reason, amount, message: message.slice(0, 1000), createdAt: new Date().toISOString() }
       if (modes.paypal === 'mock') {
         const dispute = mockPaypal.openDispute({ captureId: order.captureId, amount, reason, message: order.claimDraft.message })
@@ -269,6 +277,8 @@ export const TOOLS = [
       if (!txn) throw new ToolError('Dispute does not belong to this shopper.')
       if (dispute.status === 'RESOLVED') throw new ToolError('Dispute is already resolved.')
       const order = sessionOrders(session).find((o) => o.captureId === txn.seller_transaction_id)
+      const waiting = [...session.approvals.values()].find((a) => a.type === 'dispute_accept' && a.status === 'pending' && a.disputeId === dispute_id)
+      if (waiting) throw new ToolError('A card to settle this claim is already waiting for the shopper. Ask them to approve or reject it.')
       const approval = addApproval(session, { type: 'dispute_accept', orderId: order.orderId, disputeId: dispute_id, amount: Number(dispute.dispute_amount?.value || 0), reason: note.slice(0, 200), paypalTool: 'accept_dispute_claim' })
       return { approval_id: approval.id, status: 'pending_shopper_approval' }
     },

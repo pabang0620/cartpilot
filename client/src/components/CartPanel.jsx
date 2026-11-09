@@ -7,14 +7,17 @@ const STATUS_TEXT = {
   paid: 'Paid. See Orders.',
 }
 
-export default function CartPanel({ budget, cart, onBudget, onReview }) {
+export default function CartPanel({ budget, spent = 0, cart, onBudget, onReview }) {
   const [value, setValue] = useState(budget ?? '')
 
   useEffect(() => { setValue(budget ?? '') }, [budget])
 
-  const remaining = budget != null && cart ? budget - cart.total : null
+  // The cap covers everything spent in this session plus the cart being reviewed.
+  const inCart = cart && cart.status !== 'paid' ? cart.total : 0
+  const committed = spent + inCart
+  const remaining = budget != null && cart ? Math.round((budget - committed) * 100) / 100 : null
   const over = remaining != null && remaining < 0
-  const usedPct = budget && cart ? Math.min(100, (cart.total / budget) * 100) : 0
+  const usedPct = budget && cart ? Math.min(100, (committed / budget) * 100) : 0
 
   return (
     <section className="panel cart">

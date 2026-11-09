@@ -158,6 +158,7 @@ export default function App() {
         <div className="col">
           <CartPanel
             budget={state.budget}
+            spent={state.spent}
             cart={state.cart}
             onBudget={setBudget}
             onReview={() => { setCheckoutError(null); setShowCheckout(true) }}
