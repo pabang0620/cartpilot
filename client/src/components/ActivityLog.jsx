@@ -1,27 +1,25 @@
 const SOURCE_LABEL = {
-  channel3: 'Channel3',
-  'paypal-agent-toolkit': 'PayPal Toolkit',
-  app: 'App',
-  human: 'You',
+  channel3: 'CHANNEL3',
+  'paypal-agent-toolkit': 'PAYPAL TOOLKIT',
+  app: 'APP',
+  human: 'YOU',
 }
 
 export default function ActivityLog({ activity }) {
   return (
-    <section className="panel activity">
-      <header className="panel__head">
-        <h2>Activity</h2>
-        <span className="muted small">Every tool call, newest first</span>
-      </header>
-      {activity.length === 0 && <p className="muted empty">Nothing yet.</p>}
+    <details className="activity">
+      <summary>Activity log <span>{activity.length} tool calls, newest first</span></summary>
+      {activity.length === 0 && <p className="muted small">Nothing yet.</p>}
       <ol className="log">
         {activity.map((a) => (
           <li key={a.id} className={a.ok ? '' : 'log--error'}>
-            <span className={`chip chip--${a.source}`}><span className="chip__src">{SOURCE_LABEL[a.source] || a.source}</span>{a.tool}</span>
-            <span className="small muted">{a.origin} · {new Date(a.at).toLocaleTimeString()}</span>
-            {a.detail && <div className="small log__detail">{a.detail}</div>}
+            <span className="log__t num">{new Date(a.at).toLocaleTimeString()}</span>
+            <span className="log__src">{SOURCE_LABEL[a.source] || a.source}</span>
+            <span className="log__fn">{a.tool}{(a.origin === 'shopper' || a.source === 'human') && <span className="you">you</span>}</span>
+            {a.detail && <span className="log__detail">{a.detail}</span>}
           </li>
         ))}
       </ol>
-    </section>
+    </details>
   )
 }

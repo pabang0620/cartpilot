@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, storage } from './api.js'
 import ChatPanel from './components/ChatPanel.jsx'
-import CartPanel from './components/CartPanel.jsx'
 import CheckoutModal from './components/CheckoutModal.jsx'
-import OrdersPanel from './components/OrdersPanel.jsx'
-import ActivityLog from './components/ActivityLog.jsx'
+import JourneyPanel, { MiniSteps } from './components/JourneyPanel.jsx'
+import Icon from './components/Icons.jsx'
 
-const EMPTY_STATE = { budget: null, cart: null, orders: [], approvals: [], activity: [] }
+const EMPTY_STATE = { budget: null, spent: 0, cart: null, orders: [], approvals: [], activity: [] }
 
 const MODE_LABEL = { live: 'Live', sandbox: 'Sandbox', mock: 'Mock' }
 
@@ -15,8 +14,8 @@ function ModeBadges({ modes }) {
   const items = [['Claude', modes.llm], ['PayPal', modes.paypal], ['Channel3', modes.channel3]]
   return (
     <div className="modes">
-      {items.map(([name, mode]) => (
-        <span key={name} className={`mode mode--${mode}`}>{name} · {MODE_LABEL[mode]}</span>
+      {items.map(([name, mode], i) => (
+        <span key={name} className={`mode mode--${mode}`}>{i > 0 && ' · '}<b>{name}</b> {MODE_LABEL[mode].toLowerCase()}</span>
       ))}
     </div>
   )
@@ -142,32 +141,26 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="topbar">
+      <header className="top">
         <div className="brand">
-          <img src="/favicon.svg" alt="" width="32" height="32" />
-          <div>
-            <h1>CartPilot</h1>
-            <p className="muted small">Find it, buy it, fix it. You approve every payment.</p>
-          </div>
+          <Icon name="cart" className="brand__i" />
+          <h1>CartPilot</h1>
+          <p>Find it, buy it, fix it.</p>
         </div>
         <ModeBadges modes={modes} />
       </header>
+      <MiniSteps state={state} />
 
-      <main className="grid">
-        <ChatPanel messages={messages} busy={busy || !sessionId} onSend={send} />
-        <div className="col">
-          <CartPanel
-            budget={state.budget}
-            spent={state.spent}
-            cart={state.cart}
-            onBudget={setBudget}
-            onReview={() => { setCheckoutError(null); setShowCheckout(true) }}
-          />
-        </div>
-        <div className="col">
-          <OrdersPanel orders={state.orders} approvals={state.approvals} busy={actionBusy} onDecide={decide} onShip={ship} />
-          <ActivityLog activity={state.activity} />
-        </div>
+      <main className="layout">
+        <ChatPanel messages={messages} busy={busy || !sessionId} onSend={send} activity={state.activity} />
+        <JourneyPanel
+          state={state}
+          busy={actionBusy}
+          onBudget={setBudget}
+          onReview={() => { setCheckoutError(null); setShowCheckout(true) }}
+          onDecide={decide}
+          onShip={ship}
+        />
       </main>
 
       {showCheckout && state.cart && (

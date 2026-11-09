@@ -1,82 +1,58 @@
 import { usd } from '../api.js'
+import Icon from './Icons.jsx'
 
-const APPROVAL_TITLE = {
-  refund: 'Refund',
-  dispute_accept: 'Settle dispute',
-}
+const APPROVAL_TITLE = { refund: 'Refund', dispute_accept: 'Settle claim' }
+const STATUS_TEXT = { approved: 'Approved by you', rejected: 'Rejected by you', failed: 'Failed', expired: 'No longer needed', processing: 'Processing' }
 
-function Approval({ approval, onDecide, busy }) {
-  const pending = approval.status === 'pending'
-  return (
-    <div className={`approval approval--${approval.status}`}>
-      <div className="approval__head">
-        <strong>{APPROVAL_TITLE[approval.type]} {usd(approval.amount)}</strong>
-        <span className="status">{approval.status}</span>
-      </div>
-      <div className="small muted">Order {approval.orderId}{approval.disputeId ? ` · ${approval.disputeId}` : ''}</div>
-      <div className="small">{approval.reason}</div>
-      <div className="small muted">Runs PayPal <code>{approval.paypalTool}</code> only after you approve.</div>
-      {approval.error && <div className="error small">{approval.error}</div>}
-      {approval.result?.refundId && <div className="small">Refund id <code>{approval.result.refundId}</code></div>}
-      {pending && (
-        <div className="approval__actions">
-          <button type="button" className="btn" disabled={busy} onClick={() => onDecide(approval.id, 'reject')}>Reject</button>
+export function Approval({ approval, onDecide, busy }) {
+  if (approval.status === 'pending') {
+    return (
+      <div className="card approval">
+        <div className="approval__k">{APPROVAL_TITLE[approval.type]} waiting for your approval</div>
+        <div className="approval__amt num">{usd(approval.amount)}</div>
+        <div>{approval.reason}</div>
+        <div className="muted small">Runs PayPal <code>{approval.paypalTool}</code> only after you approve.</div>
+        <div className="approval__acts">
+          <button type="button" className="btn" disabled={busy} onClick={() => onDecide(approval.id, 'reject')}><Icon name="x" />Reject</button>
           <button type="button" className="btn btn--primary" disabled={busy} onClick={() => onDecide(approval.id, 'approve')}>
-            {approval.type === 'refund' ? 'Approve refund' : 'Approve'}
+            <Icon name="check" />{approval.type === 'refund' ? 'Approve refund' : 'Approve'}
           </button>
         </div>
-      )}
+      </div>
+    )
+  }
+  return (
+    <div className={`past past--${approval.status}`}>
+      <span>{APPROVAL_TITLE[approval.type]} <b className="num">{usd(approval.amount)}</b></span>
+      <span className="past__st">{STATUS_TEXT[approval.status] || approval.status}</span>
+      {approval.error && <div className="past__err">{approval.error}</div>}
     </div>
   )
 }
 
-function Order({ order, onShip, busy }) {
+const ORDER_STATUS = { COMPLETED: 'Paid', PARTIALLY_REFUNDED: 'Partly refunded', REFUNDED: 'Refunded' }
+
+export function OrderCard({ order, onShip, busy }) {
   const refunded = order.refunds.reduce((s, r) => s + Number(r.amount), 0)
   return (
-    <div className="order">
-      <div className="order__head">
-        <strong>{usd(order.total)}</strong>
-        <span className={`status status--${order.status}`}>{order.status.replaceAll('_', ' ')}</span>
-      </div>
-      <div className="small muted">Order <code>{order.orderId}</code></div>
-      {order.captureId && <div className="small muted">Capture <code>{order.captureId}</code></div>}
-      <ul className="order__items">
-        {order.items.map((i) => <li key={i.productId}>{i.quantity} x {i.title}</li>)}
-      </ul>
+    <div className="card">
+      <div className="row"><b>{order.items.map((i) => `${i.quantity} x ${i.title}`).join(', ')}</b><b className="num">{usd(order.total)}</b></div>
+      <div className="mono muted">Order {order.orderId} · {ORDER_STATUS[order.status] || order.status}</div>
       {order.trackers.map((t) => (
-        <div key={t.trackingNumber} className="small">Shipped via {t.carrier} · <code>{t.trackingNumber}</code></div>
+        <div key={t.trackingNumber} className="row track"><Icon name="truck" /><span>{t.carrier} <span className="mono">{t.trackingNumber}</span></span></div>
       ))}
       {order.refunds.map((r) => (
-        <div key={r.refundId} className="small">Refunded {usd(r.amount)} · {r.reason}</div>
+        <div key={r.refundId} className="row small"><span>Refunded · {r.reason}</span><span className="num">-{usd(r.amount)}</span></div>
       ))}
       {order.disputes.map((d) => (
-        <div key={d.disputeId} className="small">Dispute <code>{d.disputeId}</code> · {d.status}</div>
+        <div key={d.disputeId} className="row small"><span>Claim <span className="mono">{d.disputeId}</span></span><span>{d.status}</span></div>
       ))}
-      {refunded > 0 && <div className="small"><strong>Net paid {usd(order.total - refunded)}</strong></div>}
-      {order.captureId && order.trackers.length === 0 && order.status !== 'REFUNDED' && (
-        <button type="button" className="btn btn--ghost small" disabled={busy} onClick={() => onShip(order.orderId)}>
-          Seller: simulate shipment
+      {refunded > 0 && <div className="row net"><span>Net paid</span><b className="num">{usd(order.total - refunded)}</b></div>}
+      {order.trackers.length === 0 && order.status !== 'REFUNDED' && (
+        <button type="button" className="btn btn--ghost" disabled={busy} onClick={() => onShip(order.orderId)}>
+          Seller demo: mark as shipped
         </button>
       )}
     </div>
-  )
-}
-
-export default function OrdersPanel({ orders, approvals, busy, onDecide, onShip }) {
-  const pending = approvals.filter((a) => a.status === 'pending')
-  const done = approvals.filter((a) => a.status !== 'pending').slice(0, 4)
-  const visibleOrders = orders.filter((o) => o.captureId).slice().reverse()
-  return (
-    <section className="panel orders">
-      <header className="panel__head">
-        <h2>Orders</h2>
-        {pending.length > 0 && <span className="badge">{pending.length} to approve</span>}
-      </header>
-      {pending.map((a) => <Approval key={a.id} approval={a} busy={busy} onDecide={onDecide} />)}
-      {visibleOrders.length === 0 && <p className="muted empty">No orders yet.</p>}
-      {visibleOrders.map((o) => <Order key={o.orderId} order={o} busy={busy} onShip={onShip} />)}
-      {done.length > 0 && <h3 className="subhead">Past approvals</h3>}
-      {done.map((a) => <Approval key={a.id} approval={a} busy={busy} onDecide={onDecide} />)}
-    </section>
   )
 }
