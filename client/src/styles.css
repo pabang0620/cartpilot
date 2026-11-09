@@ -98,7 +98,7 @@ h2 { font-size: 15px; letter-spacing: 0.02em; }
 .msg--typing span:nth-child(2) { animation-delay: 0.2s; }
 .msg--typing span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes blink { 50% { opacity: 0.25; } }
-.chat__quick { display: flex; gap: 6px; overflow-x: auto; padding: 8px 0; }
+.chat__quick { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0; }
 .quick { flex: 0 0 auto; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px dashed var(--border); background: transparent; color: var(--muted); padding: 6px 10px; border-radius: 999px; font: inherit; font-size: 12.5px; cursor: pointer; }
 .quick:hover:not(:disabled) { color: var(--text); border-color: var(--primary); }
 .chat__form { display: flex; gap: 8px; }
@@ -175,3 +175,5 @@ h2 { font-size: 15px; letter-spacing: 0.02em; }
 .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; box-shadow: var(--shadow); z-index: 30; max-width: calc(100% - 32px); }
 .toast--success { background: var(--success); color: #fff; }
 .toast--error { background: var(--danger); color: #fff; }
+.md-table th, .md-table td { word-break: normal; overflow-wrap: normal; }
+.md-table td:nth-child(2), .md-table th:nth-child(2) { white-space: nowrap; }
