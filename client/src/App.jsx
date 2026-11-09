@@ -24,6 +24,7 @@ function ModeBadges({ modes }) {
 export default function App() {
   const [sessionId, setSessionId] = useState(null)
   const [modes, setModes] = useState(null)
+  const [testBuyer, setTestBuyer] = useState(null)
   const [state, setState] = useState(EMPTY_STATE)
   const [messages, setMessages] = useState([])
   const [busy, setBusy] = useState(false)
@@ -50,6 +51,7 @@ export default function App() {
     async function boot() {
       const health = await api.health()
       setModes(health.modes)
+      setTestBuyer(health.testBuyer || null)
       let data = null
       let history = []
       if (stored?.sessionId) {
@@ -82,6 +84,17 @@ export default function App() {
   useEffect(() => {
     if (sessionId) storage.set({ sessionId, messages: messages.slice(-40) })
   }, [sessionId, messages])
+
+  // Fresh session for the next tester: new cart, budget and orders.
+  async function startOver() {
+    if (busy || actionBusy) return
+    const data = await api.createSession()
+    setSessionId(data.sessionId)
+    setState(data)
+    setMessages([])
+    setShowCheckout(false)
+    notify('Started a new session')
+  }
 
   async function send(text) {
     setMessages((m) => [...m, { role: 'user', text }])
@@ -148,12 +161,15 @@ export default function App() {
           <h1>CartPilot</h1>
           <p>Find it, buy it, fix it.</p>
         </div>
-        <ModeBadges modes={modes} />
+        <div className="top__right">
+          <ModeBadges modes={modes} />
+          <button type="button" className="btn btn--ghost top__reset" onClick={startOver}>Start over</button>
+        </div>
       </header>
       <MiniSteps state={state} />
 
       <main className="layout">
-        <ChatPanel messages={messages} busy={busy || !sessionId} onSend={send} activity={state.activity} hasPaid={state.orders.some((o) => o.captureId)} />
+        <ChatPanel testBuyer={testBuyer} messages={messages} busy={busy || !sessionId} onSend={send} activity={state.activity} hasPaid={state.orders.some((o) => o.captureId)} />
         <JourneyPanel
           state={state}
           busy={actionBusy}
@@ -169,6 +185,7 @@ export default function App() {
           cart={state.cart}
           budget={state.budget}
           paypalMode={modes?.paypal}
+          testBuyer={testBuyer}
           busy={actionBusy}
           error={checkoutError}
           onConfirm={confirmCheckout}

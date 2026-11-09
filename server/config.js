@@ -14,6 +14,8 @@ export const config = {
   paypalClientSecret: forceMock ? '' : process.env.PAYPAL_CLIENT_SECRET || '',
   channel3Key: forceMock ? '' : process.env.CHANNEL3_API_KEY || '',
   shippingFlat: Number(process.env.SHIPPING_FLAT_USD || 0),
+  // PayPal Sandbox test buyer for judges. Sandbox accounts hold fake money only.
+  testBuyer: process.env.SANDBOX_BUYER_EMAIL ? { email: process.env.SANDBOX_BUYER_EMAIL, password: process.env.SANDBOX_BUYER_PASSWORD || '' } : null,
 }
 
 export const modes = {

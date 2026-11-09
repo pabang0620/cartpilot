@@ -38,7 +38,8 @@ function redirectToApp(res, params) {
 }
 
 api.get('/health', (req, res) => {
-  res.json({ success: true, data: { modes, model: config.anthropicModel, fallbacks: fallbackLog.length } })
+  const testBuyer = modes.paypal === 'sandbox' ? config.testBuyer : null
+  res.json({ success: true, data: { modes, model: config.anthropicModel, fallbacks: fallbackLog.length, testBuyer } })
 })
 
 api.post('/session', (req, res) => {

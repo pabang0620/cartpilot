@@ -25,7 +25,7 @@ function Via({ events }) {
   )
 }
 
-export default function ChatPanel({ messages, busy, onSend, activity, hasPaid }) {
+export default function ChatPanel({ messages, busy, onSend, activity, hasPaid, testBuyer }) {
   const [draft, setDraft] = useState('')
   const listRef = useRef(null)
   const inputRef = useRef(null)
@@ -55,6 +55,11 @@ export default function ChatPanel({ messages, busy, onSend, activity, hasPaid })
           <div className="intro">
             <p className="intro__lead">Tell CartPilot what you need and your budget. It finds the products, fills a cart, and after you pay it tracks the order and handles refunds and claims.</p>
             <p className="muted">It never moves money on its own. Payments, refunds and claim settlements each wait for your click.</p>
+            {testBuyer && (
+              <p className="intro__judge">
+                <b>Testing tip.</b> At checkout, log in to PayPal with the Sandbox test buyer <code>{testBuyer.email}</code> (shown again in the payment dialog). After paying, press <b>Seller demo: mark as shipped</b> on the right, then continue with steps 2 to 4. <b>Start over</b> at the top resets everything.
+              </p>
+            )}
             <p className="intro__k">Try the full story</p>
             <ol className="story">
               {STORY.map((q) => (
