@@ -34,6 +34,10 @@ React (Vite) UI ──> Express API ──> Claude tool loop (claude-sonnet-5-5,
 - Prices shown and charged always come from Channel3 results cached on the server, never from model output.
 - Orders, approvals and disputes are scoped to the browser session.
 
+## For judges
+
+Live demo: https://cartpilot.35-216-2-121.sslip.io. Follow "Try the full story" on the left. The PayPal Sandbox test buyer is shown in the payment dialog. After paying, press "Seller demo: mark as shipped", then ask about the order, a refund and a claim. "Start over" resets the session.
+
 ## Outage fallback
 
 If Claude, Channel3 or PayPal Sandbox is unreachable or its key stops working (expired, revoked, out of credit), that integration switches to the built-in mock data at runtime, so the hosted demo keeps working end to end. The mode badges in the header show which services are live. Business errors such as an over-limit refund are not treated as outages.
