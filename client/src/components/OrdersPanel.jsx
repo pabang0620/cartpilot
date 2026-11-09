@@ -65,7 +65,7 @@ function Order({ order, onShip, busy }) {
 export default function OrdersPanel({ orders, approvals, busy, onDecide, onShip }) {
   const pending = approvals.filter((a) => a.status === 'pending')
   const done = approvals.filter((a) => a.status !== 'pending').slice(0, 4)
-  const visibleOrders = orders.filter((o) => o.status !== 'PAYER_ACTION_REQUIRED' || o.captureId).slice().reverse()
+  const visibleOrders = orders.filter((o) => o.captureId).slice().reverse()
   return (
     <section className="panel orders">
       <header className="panel__head">

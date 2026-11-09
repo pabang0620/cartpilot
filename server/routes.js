@@ -58,6 +58,7 @@ api.put('/budget', (req, res, next) => {
   try {
     const body = parse(z.object({ sessionId: sessionIdSchema, amount: z.number().positive().max(100000) }), req.body)
     const session = requireSession(body.sessionId)
+    if (round2(body.amount) <= 0) throw new HttpError(400, 'amount: must be at least $0.01')
     session.budget = round2(body.amount)
     if (session.cart && session.cart.status === 'proposed' && session.cart.total > session.budget) {
       session.cart = { ...session.cart, overBudget: true }
@@ -99,6 +100,14 @@ api.post('/checkout', async (req, res, next) => {
     if (cart.status === 'paid') throw new HttpError(409, 'This cart is already paid.')
     if (session.budget == null) throw new HttpError(400, 'Set a budget cap before paying.')
     if (cart.total > session.budget) throw new HttpError(400, `Cart total $${cart.total} is over your $${session.budget} cap.`)
+    if (session.checkingOut) throw new HttpError(409, 'Checkout is already in progress.')
+    session.checkingOut = true
+    try {
+    // Paying again for the same cart replaces the earlier PayPal order, which can no longer be captured.
+    if (cart.status === 'awaiting_paypal' && cart.orderId) {
+      const previous = getSessionOrder(session, cart.orderId)
+      if (previous && !previous.captureId) previous.status = 'VOIDED'
+    }
 
     const order = await paypal(session, 'create_order', {
       currencyCode: 'USD',
@@ -135,6 +144,9 @@ api.post('/checkout', async (req, res, next) => {
     if (!session.orderIds.includes(order.id)) session.orderIds.push(order.id)
     session.cart = { ...cart, status: 'awaiting_paypal', orderId: order.id }
     res.json({ success: true, data: { orderId: order.id, approveUrl, state: publicState(session) } })
+    } finally {
+      session.checkingOut = false
+    }
   } catch (err) {
     next(err)
   }
@@ -148,6 +160,17 @@ api.get('/paypal/return', async (req, res) => {
   const order = session && getSessionOrder(session, token)
   if (!order) return redirectToApp(res, { error: 'Unknown order' })
   if (order.captureId) return redirectToApp(res, { paid: order.orderId })
+  // Capture only the order behind the current cart, still inside the budget cap.
+  const current = session.cart && session.cart.orderId === order.orderId && session.cart.status === 'awaiting_paypal'
+  if (!current || ['CANCELLED', 'VOIDED'].includes(order.status)) {
+    order.status = 'VOIDED'
+    logActivity(session, { source: 'app', tool: 'refuse_capture', origin: 'paypal-return', ok: false, detail: 'order no longer matches the cart' })
+    return redirectToApp(res, { error: 'This PayPal order no longer matches your cart, so it was not charged. Review the cart and pay again.' })
+  }
+  if (session.budget == null || order.total > session.budget) {
+    logActivity(session, { source: 'app', tool: 'refuse_capture', origin: 'paypal-return', ok: false, detail: 'over budget cap' })
+    return redirectToApp(res, { error: `Order total $${order.total} is over your $${session.budget} cap, so it was not charged.` })
+  }
   try {
     const result = await paypal(session, 'pay_order', { id: order.orderId }, 'paypal-return')
     const captured = result.response || result
@@ -156,7 +179,7 @@ api.get('/paypal/return', async (req, res) => {
     if (session.cart && session.cart.orderId === order.orderId) session.cart = { ...session.cart, status: 'paid' }
     redirectToApp(res, { paid: order.orderId })
   } catch (err) {
-    order.status = 'CAPTURE_FAILED'
+    order.status = 'PAYER_ACTION_REQUIRED'
     redirectToApp(res, { error: err.message.slice(0, 200) })
   }
 })
@@ -227,6 +250,7 @@ api.post('/seller/ship', async (req, res, next) => {
     const order = getSessionOrder(session, body.orderId)
     if (!order) throw new HttpError(404, 'Order not found.')
     if (!order.captureId) throw new HttpError(409, 'Order is not paid yet.')
+    if (refundableAmount(order) <= 0) throw new HttpError(409, 'Order is fully refunded, nothing to ship.')
     const trackingNumber = `9400${randomBytes(9).toString('hex').replace(/[a-f]/g, (c) => String(c.charCodeAt(0) % 10)).slice(0, 18)}`
     await paypal(session, 'create_shipment_tracking', {
       transaction_id: order.captureId,
@@ -239,6 +263,10 @@ api.post('/seller/ship', async (req, res, next) => {
   } catch (err) {
     next(err)
   }
+})
+
+api.use((req, res) => {
+  res.status(404).json({ success: false, message: 'Not found.' })
 })
 
 export function errorHandler(err, req, res, next) {

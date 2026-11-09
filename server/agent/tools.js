@@ -206,8 +206,13 @@ export const TOOLS = [
       if (!order.captureId) throw new ToolError('Order is not paid yet, nothing to refund.')
       const refundable = refundableAmount(order)
       if (refundable <= 0) throw new ToolError('This order is already fully refunded.')
-      const amount = round2(amount_usd ?? refundable)
-      if (!(amount > 0) || amount > refundable) throw new ToolError(`Refund must be between $0.01 and $${refundable}.`)
+      const pending = round2([...session.approvals.values()]
+        .filter((a) => a.type === 'refund' && a.status === 'pending' && a.orderId === order.orderId)
+        .reduce((sum, a) => sum + a.amount, 0))
+      const available = round2(refundable - pending)
+      if (available <= 0) throw new ToolError(`A refund card for $${pending} is already waiting for the shopper. Ask them to approve or reject it first.`)
+      const amount = round2(amount_usd ?? available)
+      if (!(amount > 0) || amount > available) throw new ToolError(`Refund must be between $0.01 and $${available}${pending ? ` ($${pending} is already waiting in a pending refund card)` : ''}.`)
       const approval = addApproval(session, { type: 'refund', orderId: order.orderId, captureId: order.captureId, amount, reason: reason.slice(0, 200), paypalTool: 'create_refund' })
       return { approval_id: approval.id, status: 'pending_shopper_approval', amount_usd: amount, refundable_usd: refundable }
     },
