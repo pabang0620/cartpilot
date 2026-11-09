@@ -7,7 +7,8 @@
     "start": "node server/index.js",
     "dev:server": "node --watch server/index.js",
     "dev:client": "vite",
-    "smoke": "bash scripts/smoke.sh"
+    "smoke": "bash scripts/smoke.sh",
+    "test": "node --test test/*.test.js"
   },
   "keywords": [
     "paypal",

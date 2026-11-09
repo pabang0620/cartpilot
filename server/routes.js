@@ -107,6 +107,51 @@ api.post('/chat', async (req, res, next) => {
   }
 })
 
+// Creates the PayPal order for the reviewed cart. Paying again for the same cart replaces the
+// earlier PayPal order, which is voided so it can never be captured.
+async function createOrderForCart(session, cart) {
+  if (cart.status === 'awaiting_paypal' && cart.orderId) {
+    const previous = getSessionOrder(session, cart.orderId)
+    if (previous && !previous.captureId) previous.status = 'VOIDED'
+  }
+
+  const order = await paypal(session, 'create_order', {
+    currencyCode: 'USD',
+    items: cart.items.map((i) => ({
+      name: i.title.slice(0, 127),
+      description: `${i.retailer || 'retailer'} via Channel3`.slice(0, 127),
+      quantity: i.quantity,
+      itemCost: i.unitPrice,
+      taxPercent: 0,
+      itemTotal: i.lineTotal,
+    })),
+    shippingCost: cart.shipping,
+    returnUrl: `${config.publicUrl}/api/paypal/return?sid=${session.id}`,
+    cancelUrl: `${config.publicUrl}/api/paypal/cancel?sid=${session.id}`,
+  }, 'shopper')
+
+  const approveUrl = approvalLink(order)
+  if (!approveUrl) throw new HttpError(502, 'PayPal did not return an approval link.')
+  saveOrder({
+    orderId: order.id,
+    sessionId: session.id,
+    status: order.status,
+    items: cart.items,
+    subtotal: cart.subtotal,
+    shipping: cart.shipping,
+    total: cart.total,
+    currency: 'USD',
+    captureId: null,
+    createdAt: new Date().toISOString(),
+    refunds: [],
+    trackers: [],
+    disputes: [],
+  })
+  if (!session.orderIds.includes(order.id)) session.orderIds.push(order.id)
+  session.cart = { ...cart, status: 'awaiting_paypal', orderId: order.id }
+  return { orderId: order.id, approveUrl }
+}
+
 // Human step 1: the shopper confirms the summary and asks to pay. Only now an order exists.
 api.post('/checkout', async (req, res, next) => {
   try {
@@ -121,47 +166,8 @@ api.post('/checkout', async (req, res, next) => {
     if (session.checkingOut) throw new HttpError(409, 'Checkout is already in progress.')
     session.checkingOut = true
     try {
-    // Paying again for the same cart replaces the earlier PayPal order, which can no longer be captured.
-    if (cart.status === 'awaiting_paypal' && cart.orderId) {
-      const previous = getSessionOrder(session, cart.orderId)
-      if (previous && !previous.captureId) previous.status = 'VOIDED'
-    }
-
-    const order = await paypal(session, 'create_order', {
-      currencyCode: 'USD',
-      items: cart.items.map((i) => ({
-        name: i.title.slice(0, 127),
-        description: `${i.retailer || 'retailer'} via Channel3`.slice(0, 127),
-        quantity: i.quantity,
-        itemCost: i.unitPrice,
-        taxPercent: 0,
-        itemTotal: i.lineTotal,
-      })),
-      shippingCost: cart.shipping,
-      returnUrl: `${config.publicUrl}/api/paypal/return?sid=${session.id}`,
-      cancelUrl: `${config.publicUrl}/api/paypal/cancel?sid=${session.id}`,
-    }, 'shopper')
-
-    const approveUrl = approvalLink(order)
-    if (!approveUrl) throw new HttpError(502, 'PayPal did not return an approval link.')
-    saveOrder({
-      orderId: order.id,
-      sessionId: session.id,
-      status: order.status,
-      items: cart.items,
-      subtotal: cart.subtotal,
-      shipping: cart.shipping,
-      total: cart.total,
-      currency: 'USD',
-      captureId: null,
-      createdAt: new Date().toISOString(),
-      refunds: [],
-      trackers: [],
-      disputes: [],
-    })
-    if (!session.orderIds.includes(order.id)) session.orderIds.push(order.id)
-    session.cart = { ...cart, status: 'awaiting_paypal', orderId: order.id }
-    res.json({ success: true, data: { orderId: order.id, approveUrl, state: publicState(session) } })
+      const { orderId, approveUrl } = await createOrderForCart(session, cart)
+      res.json({ success: true, data: { orderId, approveUrl, state: publicState(session) } })
     } finally {
       session.checkingOut = false
     }

@@ -6,6 +6,7 @@ import { config, modes } from './config.js'
 import { api, errorHandler } from './routes.js'
 import { mockPaypalRouter } from './mockPaypalPage.js'
 import { enforceLiveWindow } from './fallback.js'
+import { chatLimiter } from './demoLimits.js'
 
 const app = express()
 const distDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dist')
@@ -14,27 +15,8 @@ app.disable('x-powered-by')
 app.use(express.json({ limit: '50kb' }))
 app.use(express.urlencoded({ extended: false, limit: '10kb' }))
 
-// Public demo guard: cap agent turns per IP and per day so the hosted demo
-// cannot burn through model credits.
-const CHAT_PER_IP_HOUR = Number(process.env.CHAT_PER_IP_HOUR || 40)
-const CHAT_PER_DAY = Number(process.env.CHAT_PER_DAY || 1500)
-const chatHits = new Map()
-let dayKey = ''
-let dayCount = 0
 app.set('trust proxy', 'loopback')
-app.post('/api/chat', (req, res, next) => {
-  const now = Date.now()
-  const today = new Date(now).toISOString().slice(0, 10)
-  if (today !== dayKey) { dayKey = today; dayCount = 0; chatHits.clear() }
-  const recent = (chatHits.get(req.ip) || []).filter((t) => now - t < 3600_000)
-  if (recent.length >= CHAT_PER_IP_HOUR || dayCount >= CHAT_PER_DAY) {
-    return res.status(429).json({ success: false, message: 'Demo limit reached. Please try again later.' })
-  }
-  chatHits.set(req.ip, [...recent, now])
-  dayCount += 1
-  next()
-})
-
+app.post('/api/chat', chatLimiter)
 app.use('/api', (req, res, next) => { enforceLiveWindow(); next() })
 app.use('/api', api)
 app.use('/mock-paypal', mockPaypalRouter)

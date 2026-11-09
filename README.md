@@ -34,6 +34,28 @@ React (Vite) UI ──> Express API ──> Claude tool loop (claude-sonnet-5-5,
 - Prices shown and charged always come from Channel3 results cached on the server, never from model output.
 - Orders, approvals and disputes are scoped to the browser session.
 
+## Project structure
+
+```
+server/
+  index.js            Express app, static client, demo limits, live-window check
+  routes.js           HTTP API: session, chat, checkout, PayPal return/cancel, approvals, seller demo
+  agent/claudeAgent.js  Claude tool loop and system prompt
+  agent/tools.js      Tools the model may call (search, cart, tracking, refund/claim drafts) with server-side guards
+  agent/mockAgent.js  Rule-based stand-in used when Claude is unavailable
+  integrations/       PayPal Agent Toolkit (+ mock), Channel3 (+ mock catalog)
+  services.js         Money math: refundable, reserved amounts, refunded status
+  store.js            In-memory sessions, orders, approvals, activity log
+  fallback.js         Outage detection and the post-hackathon cutoff
+  demoLimits.js       Per-IP and daily chat caps for the public demo
+client/src/           React UI: chat on the left, purchase journey on the right
+test/                 node:test suites (money guards end to end, fallback rules)
+```
+
+## Tests
+
+`npm test` starts the app in mock mode and checks the money guards end to end: one capture per cart, no capture after cancel or after the cap is lowered, refunds and claims never exceed what was paid, session isolation, outage detection and the 2026-12-21 cutoff. `npm run smoke` walks the full story against a running server.
+
 ## For judges
 
 Live demo: https://cartpilot.35-216-2-121.sslip.io. Follow "Try the full story" on the left. The PayPal Sandbox test buyer is shown in the payment dialog. After paying, press "Seller demo: mark as shipped", then ask about the order, a refund and a claim. "Start over" resets the session.
