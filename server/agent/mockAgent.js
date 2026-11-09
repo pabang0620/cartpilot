@@ -65,7 +65,7 @@ async function shop(session, events, text) {
   const table = ['| Option | Price | Retailer | Highlights |', '|---|---|---|---|', ...candidates.map((c) => `| ${c.title}${c.product_id === pick.product_id ? ' (pick)' : ''} | ${usd(c.price)} | ${c.retailer} | ${c.key_features.slice(0, 2).join(', ')} |`)].join('\n')
   if (!cart.ok) return `${table}\n\n${cart.result.error}`
   const remaining = cart.result.remaining_budget_usd
-  return `I compared ${candidates.length} options from Channel3:\n\n${table}\n\nCart: ${quantity} x **${pick.title}** for ${usd(cart.result.cart_total_usd)}${remaining != null ? `, leaving ${usd(remaining)} of your ${usd(cap)} budget` : ''}.\n\nNext: click **Review & pay** and approve on PayPal.`
+  return `I compared ${candidates.length} ${candidates.length === 1 ? 'option' : 'options'} from Channel3:\n\n${table}\n\nCart: ${quantity} x **${pick.title}** for ${usd(cart.result.cart_total_usd)}${remaining != null ? `, leaving ${usd(remaining)} of your ${usd(cap)} budget` : ''}.\n\nNext: click **Review & pay** and approve on PayPal.`
 }
 
 async function track(session, events) {

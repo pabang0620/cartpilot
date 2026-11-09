@@ -46,6 +46,8 @@ export const TOOLS = [
       if (session.budget != null && amount > session.budget) {
         throw new ToolError(`Current cap is $${session.budget}. Raising it needs the shopper to edit the Budget field.`)
       }
+      const spent = spentAmount(session)
+      if (amount < spent) throw new ToolError(`$${spent} is already spent in this session, so the cap cannot go below that. For a per-item price limit use max_price in search_products.`)
       session.budget = amount
       return { budget_usd: amount }
     },

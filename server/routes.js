@@ -215,7 +215,8 @@ api.post('/approvals/:id', async (req, res, next) => {
     const order = getSessionOrder(session, approval.orderId)
     try {
       if (approval.type === 'refund') {
-        if (approval.amount > refundableAmount(order)) throw new HttpError(409, 'Refund exceeds the refundable amount.')
+        const inFlight = [...session.approvals.values()].filter((a) => a !== approval && a.status === 'processing' && a.orderId === order.orderId).reduce((s, a) => s + a.amount, 0)
+        if (approval.amount > round2(refundableAmount(order) - inFlight)) throw new HttpError(409, 'Refund exceeds the refundable amount.')
         const refund = await paypal(session, 'create_refund', {
           capture_id: approval.captureId,
           amount: { currency_code: 'USD', value: approval.amount.toFixed(2) },

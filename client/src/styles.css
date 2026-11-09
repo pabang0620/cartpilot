@@ -88,7 +88,7 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhe
 .md-table { overflow-x: auto; margin: 8px 0 10px; }
 .md-table table { width: 100%; border-collapse: collapse; font-size: 14px; border: 1px solid var(--line); }
 .md-table th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); background: var(--side); padding: 7px 10px; border-bottom: 1px solid var(--line); }
-.md-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.md-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: normal; word-break: normal; min-width: 80px; }
 .md-table td:nth-child(2), .md-table th:nth-child(2) { white-space: nowrap; }
 
 /* Activity log */
@@ -136,7 +136,9 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhe
 .step--todo .step__h b { color: var(--muted); }
 .step__empty { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
 
-.card { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin-top: 6px; font-size: 13.5px; }
+.card { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin-top: 6px; font-size: 13.5px; overflow-wrap: anywhere; min-width: 0; }
+.item__body { min-width: 0; }
+.claim { border-color: var(--line-strong); }
 .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .row + .row, .card > .mono + .row { margin-top: 4px; }
 .track { justify-content: flex-start; gap: 8px; }
@@ -226,4 +228,5 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhe
   .log li { grid-template-columns: 1fr auto; }
   .log__t { grid-column: 2; grid-row: 1; }
   .log__fn { grid-column: 1 / -1; }
+  .toast { top: 12px; bottom: auto; }
 }

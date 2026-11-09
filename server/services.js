@@ -28,7 +28,7 @@ const CLOSED_DISPUTE = new Set(['RESOLVED', 'CLOSED'])
 // Money already promised on an order but not refunded yet: pending refund cards and open claims.
 export function reservedAmount(session, order) {
   const pendingRefunds = [...session.approvals.values()]
-    .filter((a) => a.type === 'refund' && a.status === 'pending' && a.orderId === order.orderId)
+    .filter((a) => a.type === 'refund' && (a.status === 'pending' || a.status === 'processing') && a.orderId === order.orderId)
     .reduce((s, a) => s + a.amount, 0)
   const openClaims = order.disputes.filter((d) => !CLOSED_DISPUTE.has(d.status)).reduce((s, d) => s + Number(d.amount || 0), 0)
   return { pendingRefunds: round2(pendingRefunds), openClaims: round2(openClaims), total: round2(pendingRefunds + openClaims) }

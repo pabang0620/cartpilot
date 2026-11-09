@@ -25,9 +25,10 @@ function Via({ events }) {
   )
 }
 
-export default function ChatPanel({ messages, busy, onSend, activity }) {
+export default function ChatPanel({ messages, busy, onSend, activity, hasPaid }) {
   const [draft, setDraft] = useState('')
   const listRef = useRef(null)
+  const inputRef = useRef(null)
 
   useEffect(() => {
     const el = listRef.current
@@ -39,11 +40,12 @@ export default function ChatPanel({ messages, busy, onSend, activity }) {
     if (!value || busy) return
     setDraft('')
     onSend(value)
+    inputRef.current?.focus()
   }
 
   // Suggest the next line of the demo story the shopper has not sent yet.
   const sent = new Set(messages.filter((m) => m.role === 'user').map((m) => m.text))
-  const next = STORY.filter((q) => !sent.has(q)).slice(0, 2)
+  const next = STORY.filter((q, i) => !sent.has(q) && (i === 0 || hasPaid)).slice(0, 2)
 
   return (
     <section className="chat" aria-label="Agent chat">
@@ -81,6 +83,7 @@ export default function ChatPanel({ messages, busy, onSend, activity }) {
       )}
       <form className="composer" onSubmit={(e) => { e.preventDefault(); submit(draft) }}>
         <input
+          ref={inputRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="e.g. A quiet desk lamp under $120"

@@ -152,7 +152,7 @@ export default function App() {
       <MiniSteps state={state} />
 
       <main className="layout">
-        <ChatPanel messages={messages} busy={busy || !sessionId} onSend={send} activity={state.activity} />
+        <ChatPanel messages={messages} busy={busy || !sessionId} onSend={send} activity={state.activity} hasPaid={state.orders.some((o) => o.captureId)} />
         <JourneyPanel
           state={state}
           busy={actionBusy}

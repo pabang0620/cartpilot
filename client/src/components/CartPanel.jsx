@@ -6,11 +6,11 @@ export function BudgetForm({ budget, onBudget }) {
   const [value, setValue] = useState(budget ?? '')
   useEffect(() => { setValue(budget ?? '') }, [budget])
   return (
-    <form className="budget" onSubmit={(e) => { e.preventDefault(); const n = Number(value); if (n > 0) onBudget(n) }}>
+    <form className="budget" onSubmit={(e) => { e.preventDefault(); const n = Number(value); if (n >= 0.01 && n <= 100000) onBudget(n) }}>
       <label htmlFor="budget">Budget cap</label>
       <div className="budget__row">
         <span className="budget__unit">USD</span>
-        <input id="budget" type="number" min="1" step="1" value={value} onChange={(e) => setValue(e.target.value)} placeholder="300" />
+        <input id="budget" type="number" min="1" max="100000" step="1" value={value} onChange={(e) => setValue(e.target.value)} placeholder="300" />
         <button className="btn" type="submit">Set</button>
       </div>
       <p className="note"><Icon name="lock" />The agent can lower this cap, never raise it.</p>
@@ -39,7 +39,8 @@ export function BudgetMeter({ budget, spent, cart }) {
 
 export default function CartCard({ budget, spent = 0, cart, onReview }) {
   if (!cart) return null
-  const over = budget != null && cart.status !== 'paid' && cart.total > Math.round((budget - spent) * 100) / 100
+  const left = budget != null ? Math.round((budget - spent) * 100) / 100 : null
+  const over = left != null && cart.status !== 'paid' && cart.total > left
   return (
     <div className="card">
       {cart.summary && <p className="cart__summary">{cart.summary}</p>}
@@ -66,7 +67,9 @@ export default function CartCard({ budget, spent = 0, cart, onReview }) {
         <div className="row approved-line"><span><Icon name="check" />Approved by you on <span className="pp">PayPal</span></span></div>
       ) : (
         <button type="button" className="btn btn--paypal btn--block" disabled={over || budget == null} onClick={onReview}>
-          {budget == null ? 'Set a budget to continue' : cart.status === 'awaiting_paypal' ? 'Resume PayPal approval' : `Review & pay ${usd(cart.total)}`}
+          {budget == null ? 'Set a budget to continue'
+            : over ? `Over your cap by ${usd(Math.round((cart.total - left) * 100) / 100)}`
+              : cart.status === 'awaiting_paypal' ? 'Resume PayPal approval' : `Review & pay ${usd(cart.total)}`}
         </button>
       )}
     </div>
