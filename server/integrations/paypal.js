@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { PayPalAgentToolkit } from '@paypal/agent-toolkit/openai'
 import { config, modes } from '../config.js'
+import { isOutage, degrade } from '../fallback.js'
 
 // Only the actions this app needs. Everything else in the toolkit stays disabled.
 const ACTIONS = {
@@ -198,7 +199,15 @@ export async function callPaypal(name, args) {
     if (!handler) throw new Error(`Mock PayPal has no handler for ${name}`)
     return JSON.parse(JSON.stringify(handler(args)))
   }
-  return liveCall(name, args)
+  try {
+    return await liveCall(name, args)
+  } catch (err) {
+    if (!isOutage(err)) throw err
+    // Sandbox unreachable or credentials no longer valid: new checkouts move to the built-in PayPal stand-in.
+    degrade('paypal', err)
+    if (name === 'create_order') return callPaypal(name, args)
+    throw new Error('PayPal sandbox is unavailable right now. New orders use the built-in demo checkout.')
+  }
 }
 
 export function approvalLink(order) {

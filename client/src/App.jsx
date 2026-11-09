@@ -90,6 +90,7 @@ export default function App() {
       const data = await api.chat(sessionId, text)
       setMessages((m) => [...m, { role: 'agent', text: data.reply, events: data.events }])
       setState(data.state)
+      if (data.modes) setModes(data.modes)
     } catch (err) {
       setMessages((m) => [...m, { role: 'agent', text: `Something went wrong: ${err.message}`, events: [] }])
     } finally {

@@ -34,6 +34,10 @@ React (Vite) UI ──> Express API ──> Claude tool loop (claude-sonnet-5-5,
 - Prices shown and charged always come from Channel3 results cached on the server, never from model output.
 - Orders, approvals and disputes are scoped to the browser session.
 
+## Outage fallback
+
+If Claude, Channel3 or PayPal Sandbox is unreachable or its key stops working (expired, revoked, out of credit), that integration switches to the built-in mock data at runtime, so the hosted demo keeps working end to end. The mode badges in the header show which services are live. Business errors such as an over-limit refund are not treated as outages.
+
 ## Run it
 
 Requirements: Node 20+.

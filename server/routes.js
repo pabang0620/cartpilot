@@ -7,6 +7,7 @@ import { paypal, round2, refundableAmount, settleOrderState } from './services.j
 import { approvalLink, captureIdOf } from './integrations/paypal.js'
 import { runClaudeAgent } from './agent/claudeAgent.js'
 import { runMockAgent } from './agent/mockAgent.js'
+import { isOutage, degrade, fallbackLog } from './fallback.js'
 
 export const api = Router()
 
@@ -37,7 +38,7 @@ function redirectToApp(res, params) {
 }
 
 api.get('/health', (req, res) => {
-  res.json({ success: true, data: { modes, model: config.anthropicModel } })
+  res.json({ success: true, data: { modes, model: config.anthropicModel, fallbacks: fallbackLog.length } })
 })
 
 api.post('/session', (req, res) => {
@@ -79,9 +80,24 @@ api.post('/chat', async (req, res, next) => {
     if (session.busy) throw new HttpError(409, 'The agent is still working on the previous message.')
     session.busy = true
     try {
-      const run = modes.llm === 'live' ? runClaudeAgent : runMockAgent
-      const { reply, events } = await run(session, body.message)
-      res.json({ success: true, data: { reply, events, state: publicState(session) } })
+      let result
+      if (modes.llm === 'live') {
+        const before = session.messages?.length ?? 0
+        try {
+          result = await runClaudeAgent(session, body.message)
+        } catch (err) {
+          if (!isOutage(err)) throw err
+          // Claude is unreachable or the key stopped working: answer from the built-in agent instead.
+          if (session.messages) session.messages.length = before
+          if (/401|403|authentication|api key|credit balance|permission/i.test(`${err.status} ${err.message}`)) degrade('llm', err)
+          console.error('[fallback] Claude call failed, using the built-in agent for this message:', err.message)
+          result = await runMockAgent(session, body.message)
+        }
+      } else {
+        result = await runMockAgent(session, body.message)
+      }
+      const { reply, events } = result
+      res.json({ success: true, data: { reply, events, state: publicState(session), modes } })
     } finally {
       session.busy = false
     }
