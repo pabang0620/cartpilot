@@ -122,5 +122,5 @@ export async function runMockAgent(session, text) {
   else if (/refund|money back|broken|damaged|return it/.test(t)) reply = await refund(session, events, t)
   else if (/track|where is|where are|shipping status|delivered|arrive/.test(t)) reply = await track(session, events)
   else reply = await shop(session, events, text)
-  return { reply: `${reply}\n\n_(Mock agent: set ANTHROPIC_API_KEY for Claude.)_`, events }
+  return { reply: `${reply}\n\n_(Mock agent: set `ANTHROPIC_API_KEY` for Claude.)_`, events }
 }

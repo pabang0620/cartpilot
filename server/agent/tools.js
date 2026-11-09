@@ -163,7 +163,8 @@ export const TOOLS = [
     description: 'List this shopper\'s orders with status, capture id, refunds, tracking and disputes. Call this first for any after-purchase question.',
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
     async run(session) {
-      return { orders: sessionOrders(session).filter((o) => o.status !== 'VOIDED').map(compactOrder) }
+      const cards = [...session.approvals.values()].map((a) => ({ type: a.type, order_id: a.orderId, amount_usd: a.amount, status: a.status }))
+      return { orders: sessionOrders(session).filter((o) => o.status !== 'VOIDED').map(compactOrder), approval_cards: cards }
     },
   },
   fromToolkit('get_order', async (session, args) => {

@@ -34,4 +34,4 @@ export const storage = {
   },
 }
 
-export const usd = (n) => (n == null ? '-' : `$${Number(n).toFixed(2)}`)
+export const usd = (n) => (n == null || !Number.isFinite(Number(n)) ? '-' : `${Number(n) < 0 ? '-' : ''}$${Math.abs(Number(n)).toFixed(2)}`)
