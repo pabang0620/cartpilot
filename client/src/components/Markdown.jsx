@@ -3,7 +3,7 @@
 
 function inline(text, keyPrefix) {
   const parts = []
-  const pattern = /(\*\*[^*]+\*\*|_[^_]+_|`[^`]+`|https?:\/\/[^\s)|]+)/g
+  const pattern = /(\[[^\]]+\]\(https?:\/\/[^\s)]+\)|\*\*[^*]+\*\*|_[^_]+_|`[^`]+`|https?:\/\/[^\s)|]+)/g
   let last = 0
   let match
   let i = 0
@@ -11,7 +11,9 @@ function inline(text, keyPrefix) {
     if (match.index > last) parts.push(text.slice(last, match.index))
     const token = match[0]
     const key = `${keyPrefix}-${i++}`
-    if (token.startsWith('**')) parts.push(<strong key={key}>{token.slice(2, -2)}</strong>)
+    const link = token.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/)
+    if (link) parts.push(<a key={key} href={link[2]} target="_blank" rel="noreferrer">{link[1]}</a>)
+    else if (token.startsWith('**')) parts.push(<strong key={key}>{token.slice(2, -2)}</strong>)
     else if (token.startsWith('_')) parts.push(<em key={key}>{token.slice(1, -1)}</em>)
     else if (token.startsWith('`')) parts.push(<code key={key}>{token.slice(1, -1)}</code>)
     else parts.push(<a key={key} href={token} target="_blank" rel="noreferrer">{token}</a>)
