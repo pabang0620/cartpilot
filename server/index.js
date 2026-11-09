@@ -5,6 +5,7 @@ import path from 'node:path'
 import { config, modes } from './config.js'
 import { api, errorHandler } from './routes.js'
 import { mockPaypalRouter } from './mockPaypalPage.js'
+import { enforceLiveWindow } from './fallback.js'
 
 const app = express()
 const distDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dist')
@@ -34,6 +35,7 @@ app.post('/api/chat', (req, res, next) => {
   next()
 })
 
+app.use('/api', (req, res, next) => { enforceLiveWindow(); next() })
 app.use('/api', api)
 app.use('/mock-paypal', mockPaypalRouter)
 

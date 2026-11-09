@@ -23,3 +23,15 @@ export function degrade(service, err) {
   fallbackLog.push(entry)
   console.error(`[fallback] ${service} switched to mock data: ${entry.reason}`)
 }
+
+// Paid keys stop after the hackathon results (2026-12-21, end of day in Korea).
+// After this moment Claude and Channel3 are never called again; the demo runs on the
+// built-in data. The date is in code on purpose so a missing env value cannot extend it.
+export const LIVE_UNTIL = new Date('2026-12-22T00:00:00+09:00').getTime()
+
+export function enforceLiveWindow(now = Date.now()) {
+  if (now < LIVE_UNTIL) return
+  for (const service of ['llm', 'channel3']) {
+    if (modes[service] !== 'mock') degrade(service, 'Hackathon live window ended on 2026-12-21')
+  }
+}

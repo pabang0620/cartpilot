@@ -40,7 +40,7 @@ Live demo: https://cartpilot.35-216-2-121.sslip.io. Follow "Try the full story" 
 
 ## Outage fallback
 
-If Claude, Channel3 or PayPal Sandbox is unreachable or its key stops working (expired, revoked, out of credit), that integration switches to the built-in mock data at runtime, so the hosted demo keeps working end to end. The mode badges in the header show which services are live. Business errors such as an over-limit refund are not treated as outages.
+If Claude, Channel3 or PayPal Sandbox is unreachable or its key stops working (expired, revoked, out of credit), that integration switches to the built-in mock data at runtime, so the hosted demo keeps working end to end. The mode badges in the header show which services are live. Business errors such as an over-limit refund are not treated as outages. After the hackathon results (end of 2026-12-21, KST) the server stops calling Claude and Channel3 for good and runs on the built-in data.
 
 ## Run it
 
