@@ -1,0 +1,37 @@
+{
+  "name": "cartpilot",
+  "version": "1.0.0",
+  "description": "AI shopping agent: find, buy, track, refund with Channel3 + PayPal Agent Toolkit",
+  "scripts": {
+    "build": "vite build",
+    "start": "node server/index.js",
+    "dev:server": "node --watch server/index.js",
+    "dev:client": "vite",
+    "smoke": "bash scripts/smoke.sh"
+  },
+  "keywords": [
+    "paypal",
+    "agent",
+    "channel3",
+    "claude"
+  ],
+  "author": "Wonho Lee",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
+    "@paypal/agent-toolkit": "^1.11.0",
+    "dotenv": "^18.0.10",
+    "express": "^5.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.2.1",
+    "vite": "^8.3.6"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
+}
