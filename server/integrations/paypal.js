@@ -45,9 +45,74 @@ async function liveCall(name, args) {
   return parsed
 }
 
+// ---------------- PayPal REST: authorize now, capture each package on delivery ----------------
+// The Agent Toolkit creates CAPTURE orders only, so the hold-and-capture flow calls the Orders and
+// Payments REST APIs directly. Refunds, tracking and disputes still go through the toolkit.
+
+export const REST_CALLS = new Set(['create_authorize_order', 'authorize_order', 'capture_authorization', 'void_authorization'])
+const API_BASE = 'https://api-m.sandbox.paypal.com'
+let token = { value: null, expires: 0 }
+
+async function accessToken() {
+  if (token.value && Date.now() < token.expires - 60000) return token.value
+  const basic = Buffer.from(`${config.paypalClientId}:${config.paypalClientSecret}`).toString('base64')
+  const res = await fetch(`${API_BASE}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=client_credentials',
+  })
+  if (!res.ok) throw new Error(`PayPal oauth: ${res.status} unauthorized`)
+  const data = await res.json()
+  token = { value: data.access_token, expires: Date.now() + data.expires_in * 1000 }
+  return token.value
+}
+
+async function rest(method, path, body) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${await accessToken()}`, 'Content-Type': 'application/json', 'PayPal-Request-Id': randomBytes(12).toString('hex') },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  const text = await res.text()
+  const data = text ? JSON.parse(text) : {}
+  if (!res.ok) {
+    const issue = data.details?.[0]?.issue || data.name || res.status
+    throw new Error(`PayPal ${path.split('/').slice(-1)[0]}: ${issue} (${res.status})`)
+  }
+  return data
+}
+
+function orderRequest({ items, shippingCost, returnUrl, cancelUrl }) {
+  const subtotal = round2(items.reduce((s, i) => s + i.itemCost * i.quantity, 0))
+  const total = round2(subtotal + (shippingCost || 0))
+  return {
+    intent: 'AUTHORIZE',
+    purchase_units: [{
+      amount: { ...money(total), breakdown: { item_total: money(subtotal), shipping: money(shippingCost || 0) } },
+      items: items.map((i) => ({ name: i.name, description: i.description, quantity: String(i.quantity), unit_amount: money(i.itemCost) })),
+    }],
+    payment_source: { paypal: { experience_context: { return_url: returnUrl, cancel_url: cancelUrl, user_action: 'CONTINUE', shipping_preference: 'NO_SHIPPING' } } },
+  }
+}
+
+const restHandlers = {
+  create_authorize_order: (args) => rest('POST', '/v2/checkout/orders', orderRequest(args)),
+  authorize_order: ({ id }) => rest('POST', `/v2/checkout/orders/${id}/authorize`, {}),
+  capture_authorization: ({ authorization_id, amount, final_capture, invoice_id }) =>
+    rest('POST', `/v2/payments/authorizations/${authorization_id}/capture`, { amount: money(amount), final_capture, invoice_id }),
+  void_authorization: async ({ authorization_id }) => {
+    await rest('POST', `/v2/payments/authorizations/${authorization_id}/void`)
+    return { id: authorization_id, status: 'VOIDED' }
+  },
+}
+
+export function authorizationOf(order) {
+  return order?.purchase_units?.[0]?.payments?.authorizations?.[0] || null
+}
+
 // ---------------- MOCK PayPal (same response shapes as the sandbox) ----------------
 
-const mock = { orders: new Map(), captures: new Map(), refunds: new Map(), trackers: new Map(), disputes: new Map() }
+const mock = { orders: new Map(), captures: new Map(), refunds: new Map(), trackers: new Map(), disputes: new Map(), authorizations: new Map() }
 const ALNUM = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
 
 function mockId(length = 17) {
@@ -106,6 +171,39 @@ const mockHandlers = {
     order.status = 'COMPLETED'
     order.purchase_units[0].payments = { captures: [capture] }
     return { status: 'success', response: publicOrder(order) }
+  },
+  create_authorize_order(args) {
+    const order = mockHandlers.create_order({ ...args, items: args.items })
+    mock.orders.get(order.id).intent = 'AUTHORIZE'
+    return publicOrder(mock.orders.get(order.id))
+  },
+  authorize_order({ id }) {
+    const order = mock.orders.get(id)
+    if (!order) throw new Error(`PayPal authorize: RESOURCE_NOT_FOUND ${id}`)
+    if (order.status !== 'APPROVED') throw new Error('PayPal authorize: ORDER_NOT_APPROVED')
+    const authorization = { id: mockId(), status: 'CREATED', amount: money(order.purchase_units[0].amount.value), captured: 0 }
+    mock.authorizations.set(authorization.id, authorization)
+    order.status = 'COMPLETED'
+    order.purchase_units[0].payments = { authorizations: [{ id: authorization.id, status: 'CREATED', amount: authorization.amount }] }
+    return publicOrder(order)
+  },
+  capture_authorization({ authorization_id, amount, final_capture }) {
+    const auth = mock.authorizations.get(authorization_id)
+    if (!auth) throw new Error(`PayPal capture: RESOURCE_NOT_FOUND ${authorization_id}`)
+    if (['VOIDED', 'CAPTURED'].includes(auth.status)) throw new Error('PayPal capture: AUTHORIZATION_ALREADY_COMPLETED')
+    if (round2(auth.captured + Number(amount)) > Number(auth.amount.value) + 0.001) throw new Error('PayPal capture: MAX_CAPTURE_AMOUNT_EXCEEDED')
+    const capture = { id: mockId(), status: 'COMPLETED', amount: money(amount), final_capture: !!final_capture, create_time: new Date().toISOString() }
+    mock.captures.set(capture.id, { ...capture, authorization_id })
+    auth.captured = round2(auth.captured + Number(amount))
+    auth.status = final_capture ? 'CAPTURED' : 'PARTIALLY_CAPTURED'
+    return capture
+  },
+  void_authorization({ authorization_id }) {
+    const auth = mock.authorizations.get(authorization_id)
+    if (!auth) throw new Error(`PayPal void: RESOURCE_NOT_FOUND ${authorization_id}`)
+    if (['VOIDED', 'CAPTURED'].includes(auth.status)) throw new Error('PayPal void: AUTHORIZATION_ALREADY_COMPLETED')
+    auth.status = 'VOIDED'
+    return { id: authorization_id, status: 'VOIDED' }
   },
   create_refund({ capture_id, amount, note_to_payer }) {
     const capture = mock.captures.get(capture_id)
@@ -200,7 +298,7 @@ export async function callPaypal(name, args) {
     return JSON.parse(JSON.stringify(handler(args)))
   }
   try {
-    return await liveCall(name, args)
+    return REST_CALLS.has(name) ? await restHandlers[name](args) : await liveCall(name, args)
   } catch (err) {
     if (!isOutage(err)) throw err
     // Only switch for good when the credentials stop working. Network blips and 5xx stay live,
@@ -209,7 +307,7 @@ export async function callPaypal(name, args) {
       throw new Error('PayPal sandbox did not answer. Please try again in a moment.')
     }
     degrade('paypal', err)
-    if (name === 'create_order') return callPaypal(name, args)
+    if (name === 'create_order' || name === 'create_authorize_order') return callPaypal(name, args)
     throw new Error('PayPal sandbox is unavailable right now. New orders use the built-in demo checkout.')
   }
 }

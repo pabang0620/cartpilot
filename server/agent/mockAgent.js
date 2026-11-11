@@ -38,7 +38,7 @@ async function call(session, events, name, input) {
 }
 
 function latestPaidOrder(orders) {
-  return [...orders].reverse().find((o) => o.capture_id) || null
+  return [...orders].reverse().find((o) => o.authorization_id) || null
 }
 
 const usd = (n) => `$${Number(n).toFixed(2)}`
@@ -68,59 +68,74 @@ async function shop(session, events, text) {
   return `I compared ${candidates.length} ${candidates.length === 1 ? 'option' : 'options'} from Channel3:\n\n${table}\n\nCart: ${quantity} x **${pick.title}** for ${usd(cart.result.cart_total_usd)}${remaining != null ? `, leaving ${usd(remaining)} of your ${usd(cap)} budget` : ''}.\n\nNext: click **Review & pay** and approve on PayPal.`
 }
 
+const PACKAGE_STATUS = { awaiting_shipment: 'waiting to ship', in_transit: 'in transit', delivered: 'delivered and charged', released: 'released, not charged' }
+
 async function track(session, events) {
   const list = await call(session, events, 'list_my_orders', {})
   const order = latestPaidOrder(list.result.orders)
-  if (!order) return 'You have no paid orders yet.'
+  if (!order) return 'You have no approved orders yet.'
   const tracking = await call(session, events, 'get_shipment_tracking', { order_id: order.order_id })
-  const trackers = tracking.ok ? tracking.result.trackers || [] : []
-  if (!trackers.length) return `Order ${order.order_id} is paid (capture ${order.capture_id}) but the seller has not added tracking yet.`
-  const t = trackers[trackers.length - 1]
-  return `Order ${order.order_id}: **${t.status}** with ${t.carrier}, tracking number ${t.tracking_number}.`
+  const packages = tracking.ok ? tracking.result.packages : order.packages
+  const rows = packages.map((p) => `| ${p.package_id} | ${p.item} | ${PACKAGE_STATUS[p.status] || p.status} | ${p.tracking_number ? `${p.carrier} ${p.tracking_number}` : '-'} |`)
+  return [`Order ${order.order_id}: charged ${usd(order.charged_usd)}, on hold ${usd(order.on_hold_usd)}.`, '', '| Package | Item | Status | Tracking |', '|---|---|---|---|', ...rows].join('\n')
 }
 
 async function refund(session, events, text) {
   const list = await call(session, events, 'list_my_orders', {})
   const order = latestPaidOrder(list.result.orders)
-  if (!order) return 'You have no paid orders to refund.'
-  const partial = /\b(one|a single|1)\b/i.test(text) && order.items.some((i) => i.quantity > 1)
-  const amount = partial ? order.items[0].unit_price_usd : undefined
+  if (!order) return 'You have no approved orders to refund.'
+  const pkg = order.packages.find((p) => p.status === 'delivered' && p.refundable_usd > 0)
+  if (!pkg) return 'No delivered package can be refunded yet. Packages that have not arrived are not charged.'
   const reason = /broken|damaged|defect/i.test(text) ? 'Item arrived damaged' : 'Shopper requested a refund'
-  const req = await call(session, events, 'request_refund', { order_id: order.order_id, amount_usd: amount, reason })
+  const req = await call(session, events, 'request_refund', { order_id: order.order_id, package_id: pkg.package_id, reason })
   if (!req.ok) return req.result.error
-  return `I prepared a ${partial ? 'partial ' : ''}refund of ${usd(req.result.amount_usd)} on order ${order.order_id} (${reason.toLowerCase()}). Nothing is refunded until you click **Approve refund**.`
+  return `I prepared a refund request for ${pkg.package_id} (${usd(req.result.amount_usd)}, ${reason.toLowerCase()}). Nothing is sent to the merchant until you click **Approve**.`
+}
+
+async function missing(session, events) {
+  const list = await call(session, events, 'list_my_orders', {})
+  const order = latestPaidOrder(list.result.orders)
+  if (!order) return 'You have no approved orders.'
+  const open = order.packages.filter((p) => p.status === 'in_transit' || p.status === 'awaiting_shipment')
+  const pkg = open.find((p) => p.carrier_reported_lost) || open[0]
+  if (!pkg) return 'Every package on this order is already delivered or released.'
+  const req = await call(session, events, 'report_missing_package', { order_id: order.order_id, package_id: pkg.package_id, reason: 'Package did not arrive' })
+  if (!req.ok) return req.result.error
+  return `${pkg.package_id} has no delivery scan, so it was never charged. I prepared a request to release its ${usd(pkg.price_usd)} from the PayPal hold. Click **Approve** to send it.`
 }
 
 async function claim(session, events, text) {
   const list = await call(session, events, 'list_my_orders', {})
   const order = latestPaidOrder(list.result.orders)
-  if (!order) return 'You have no paid orders to file a claim on.'
+  if (!order) return 'You have no approved orders to file a claim on.'
   const open = order.disputes.find((d) => d.status !== 'RESOLVED')
   if (open && /resolve|settle|accept/i.test(text)) {
     const req = await call(session, events, 'request_dispute_resolution', { dispute_id: open.dispute_id, note: 'Seller accepts the claim and refunds the buyer' })
-    return req.ok ? `Ready to settle dispute ${open.dispute_id}. Click **Approve** to accept the claim and refund it.` : req.result.error
+    return req.ok ? `Ready to ask the merchant to settle dispute ${open.dispute_id}. Click **Approve** to send it.` : req.result.error
   }
-  const notReceived = /never|not received|didn.?t (arrive|come)|missing|lost/i.test(text)
-  const amount = order.items[0].quantity > 1 ? order.items[0].unit_price_usd : Math.min(order.refundable_usd, order.items[0].unit_price_usd)
+  const pkg = order.packages.find((p) => p.status === 'delivered' && p.refundable_usd > 0)
+  if (!pkg) return 'Claims are only for delivered packages. Packages that did not arrive are never charged.'
   const filed = await call(session, events, 'open_claim', {
     order_id: order.order_id,
-    reason: notReceived ? 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED' : 'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED',
-    amount_usd: amount,
-    message: notReceived ? `One unit of ${order.items[0].title} was never delivered.` : `${order.items[0].title} does not match the description.`,
+    package_id: pkg.package_id,
+    reason: 'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED',
+    amount_usd: pkg.refundable_usd,
+    message: `${pkg.item} does not match the description.`,
   })
   if (!filed.ok) return filed.result.error
   await call(session, events, 'list_disputes', {})
-  if (filed.result.filed) return `Claim ${filed.result.dispute_id} is open for ${usd(amount)}. I will follow it with PayPal disputes. Say "resolve the claim" to settle it.`
-  return `I drafted your claim for ${usd(amount)}. Submit it in the PayPal Resolution Center (${filed.result.resolution_center_url}), then ask me to check its status.`
+  if (filed.result.filed) return `Claim ${filed.result.dispute_id} is open for ${usd(pkg.refundable_usd)}. Say "resolve the claim" to ask the merchant to settle it.`
+  return `I drafted your claim. Submit it in the PayPal Resolution Center (${filed.result.resolution_center_url}), then ask me to check its status.`
 }
 
 export async function runMockAgent(session, text) {
   const events = []
   const t = text.toLowerCase()
   let reply
-  if (/claim|dispute|never arrived|not received|didn.?t arrive|missing/.test(t)) reply = await claim(session, events, t)
+  if (/claim|dispute/.test(t)) reply = await claim(session, events, t)
+  else if (/never arrived|not received|didn.?t (arrive|come)|missing|lost/.test(t)) reply = await missing(session, events)
   else if (/refund|money back|broken|damaged|return it/.test(t)) reply = await refund(session, events, t)
   else if (/track|where is|where are|shipping status|delivered|arrive/.test(t)) reply = await track(session, events)
   else reply = await shop(session, events, text)
-  return { reply: `${reply}\n\n_(Mock agent: set \`ANTHROPIC_API_KEY\` for Claude.)_`, events }
+  return { reply: `${reply}\n\n_(Answered by the built-in rule agent, which calls the same tools. Claude is off or the public demo limit was reached.)_`, events }
 }

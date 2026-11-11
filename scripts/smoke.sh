@@ -12,7 +12,7 @@ echo "1. health:   $(curl -sf "$BASE/api/health" | jget 'd.data.modes')"
 SID=$(curl -sf -XPOST "$BASE/api/session" | jget 'd.data.sessionId')
 echo "2. session:  $SID"
 
-R=$(chat 'I need two camping chairs for a festival, under $300 total')
+R=$(chat 'I need three camping chairs for a festival, under $300 total')
 echo "3. shop:     tools=$(echo "$R" | jget 'd.data.events.map(e=>e.tool).join(",")')"
 CART=$(echo "$R" | jget 'd.data.state.cart.id')
 echo "   cart:     total=$(echo "$R" | jget 'd.data.state.cart.total') budget=$(echo "$R" | jget 'd.data.state.budget')"
@@ -24,27 +24,28 @@ echo "4. checkout: order=$OID approveUrl=$(echo "$R" | jget 'd.data.approveUrl')
 LOC=$(curl -s -o /dev/null -w '%{redirect_url}' -XPOST "$BASE/mock-paypal/approve" -d "token=$OID")
 echo "5. approve:  redirect -> ${LOC%%\?*}"
 FINAL=$(curl -s -o /dev/null -w '%{redirect_url}' "$LOC")
-echo "6. capture:  redirect -> $FINAL"
+echo "6. hold:     redirect -> $FINAL"
 
 S=$(curl -sf "$BASE/api/state?sessionId=$SID")
-echo "   order:    status=$(echo "$S" | jget 'd.data.orders[0].status') capture=$(echo "$S" | jget 'd.data.orders[0].captureId')"
+echo "   order:    status=$(echo "$S" | jget 'd.data.orders[0].status') money=$(echo "$S" | jget 'd.data.orders[0].money')"
 
 curl -sf -XPOST "$BASE/api/seller/ship" -H "$J" -d "{\"sessionId\":\"$SID\",\"orderId\":\"$OID\"}" > /dev/null
+for P in PKG-1 PKG-2; do
+  S=$(curl -sf -XPOST "$BASE/api/seller/deliver" -H "$J" -d "{\"sessionId\":\"$SID\",\"orderId\":\"$OID\",\"packageId\":\"$P\"}")
+  echo "7. deliver:  $P money=$(echo "$S" | jget 'd.data.orders[0].money')"
+done
 R=$(chat 'Where are my chairs?')
-echo "7. track:    $(echo "$R" | jget 'd.data.reply.split("\n")[0]')"
+echo "8. track:    $(echo "$R" | jget 'd.data.reply.split("\n")[0]')"
 
 R=$(chat 'One chair arrived with a broken leg. Refund that one.')
 APP=$(echo "$R" | jget 'd.data.state.approvals.find(a=>a.status==="pending").id')
-echo "8. refund?:  $(echo "$R" | jget 'd.data.reply.split("\n")[0]')"
 S=$(curl -sf -XPOST "$BASE/api/approvals/$APP" -H "$J" -d "{\"sessionId\":\"$SID\",\"decision\":\"approve\"}")
-echo "   approved: refunds=$(echo "$S" | jget 'd.data.orders[0].refunds.map(r=>r.amount+" "+r.refundId)')"
+echo "9. refund:   refunds=$(echo "$S" | jget 'd.data.orders[0].refunds.map(r=>r.packageId+" "+r.amount)')"
 
-R=$(chat 'The other chair never arrived. Open a claim.')
-echo "9. claim:    $(echo "$R" | jget 'd.data.reply.split("\n")[0]')"
-R=$(chat 'Please resolve the claim')
+R=$(chat 'The third chair never arrived.')
 APP=$(echo "$R" | jget 'd.data.state.approvals.find(a=>a.status==="pending").id')
 S=$(curl -sf -XPOST "$BASE/api/approvals/$APP" -H "$J" -d "{\"sessionId\":\"$SID\",\"decision\":\"approve\"}")
-echo "   settled:  disputes=$(echo "$S" | jget 'd.data.orders[0].disputes.map(x=>x.disputeId+" "+x.status)') refunds_total=$(echo "$S" | jget 'd.data.orders[0].refunds.reduce((s,r)=>s+r.amount,0)')"
+echo "   release:  auth=$(echo "$S" | jget 'd.data.orders[0].authorizationStatus') money=$(echo "$S" | jget 'd.data.orders[0].money')"
 
 echo "10. guards:"
 echo "   over-refund: $(curl -s -XPOST "$BASE/api/chat" -H "$J" -d "{\"sessionId\":\"$SID\",\"message\":\"refund everything\"}" | jget 'd.data.reply.split("\n")[0]')"

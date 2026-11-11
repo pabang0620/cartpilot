@@ -10,6 +10,8 @@ export const config = {
   appUrl: (process.env.APP_URL || publicUrl).replace(/\/$/, ''),
   anthropicKey: forceMock ? '' : process.env.ANTHROPIC_API_KEY || '',
   anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
+  // 'account' = local development through the Claude Agent SDK and the developer's Claude Code login.
+  llmBackend: !forceMock && process.env.LLM_BACKEND === 'account' ? 'account' : 'api',
   paypalClientId: forceMock ? '' : process.env.PAYPAL_CLIENT_ID || '',
   paypalClientSecret: forceMock ? '' : process.env.PAYPAL_CLIENT_SECRET || '',
   channel3Key: forceMock ? '' : process.env.CHANNEL3_API_KEY || '',
@@ -19,7 +21,7 @@ export const config = {
 }
 
 export const modes = {
-  llm: config.anthropicKey ? 'live' : 'mock',
+  llm: config.anthropicKey || config.llmBackend === 'account' ? 'live' : 'mock',
   paypal: config.paypalClientId && config.paypalClientSecret ? 'sandbox' : 'mock',
   channel3: config.channel3Key ? 'live' : 'mock',
 }

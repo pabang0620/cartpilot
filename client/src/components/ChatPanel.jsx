@@ -4,13 +4,14 @@ import Icon from './Icons.jsx'
 import ActivityLog from './ActivityLog.jsx'
 
 const STORY = [
-  'I need two camping chairs for a festival, under $300 total. Light and comfortable.',
+  'I need three camping chairs for a festival, under $300 total. Light and comfortable.',
   'Where are my chairs?',
   'One chair arrived with a broken leg. Refund that one.',
-  'The other chair never arrived. Open a claim.',
+  'The third chair never arrived.',
+  'Find two replacement chairs inside my budget.',
 ]
 
-const SOURCE_LABEL = { channel3: 'CHANNEL3', 'paypal-agent-toolkit': 'PAYPAL', app: 'APP' }
+const SOURCE_LABEL = { channel3: 'CHANNEL3', 'paypal-agent-toolkit': 'PAYPAL', 'paypal-rest': 'PAYPAL', app: 'APP' }
 
 function Via({ events }) {
   if (!events?.length) return null
@@ -32,7 +33,8 @@ export default function ChatPanel({ messages, busy, onSend, activity, hasPaid, t
 
   useEffect(() => {
     const el = listRef.current
-    if (el) el.scrollTop = el.scrollHeight
+    // Keep the intro at the top; follow the conversation once it starts.
+    if (el && messages.length > 0) el.scrollTop = el.scrollHeight
   }, [messages, busy])
 
   function submit(text) {
@@ -53,11 +55,11 @@ export default function ChatPanel({ messages, busy, onSend, activity, hasPaid, t
       <div className="thread" ref={listRef}>
         {messages.length === 0 && (
           <div className="intro">
-            <p className="intro__lead">Tell CartPilot what you need and your budget. It finds the products, fills a cart, and after you pay it tracks the order and handles refunds and claims.</p>
-            <p className="muted">It never moves money on its own. Payments, refunds and claim settlements each wait for your click.</p>
+            <p className="intro__lead">Tell CartPilot what you need and your budget. It finds the products and fills a cart. At checkout PayPal only holds the money, and each package is charged when it is delivered.</p>
+            <p className="muted">If a package never arrives, you never pay for it: no refund to chase, no chargeback. The agent cannot raise your cap or move money on its own.</p>
             {testBuyer && (
               <p className="intro__judge">
-                <b>Testing tip.</b> At checkout, log in to PayPal with the Sandbox test buyer <code>{testBuyer.email}</code> (shown again in the payment dialog). After paying, press <b>Seller demo: mark as shipped</b> on the right, then continue with steps 2 to 4. <b>Start over</b> at the top resets everything.
+                <b>Testing tip.</b> At checkout, log in to PayPal with the Sandbox test buyer <code>{testBuyer.email}</code> (shown again in the payment dialog). Back here, press <b>Quick demo</b> in the <b>Demo merchant console</b> (purchase panel): it ships, delivers two packages and the carrier loses the third. Then continue with steps 2 to 5. <b>Start over</b> at the top resets everything.
               </p>
             )}
             <p className="intro__k">Try the full story</p>
@@ -73,7 +75,7 @@ export default function ChatPanel({ messages, busy, onSend, activity, hasPaid, t
             ? <div key={i} className="msg-user">{m.text}</div>
             : (
               <div key={i} className="msg-agent">
-                <div className="who"><b>CartPilot</b></div>
+                <div className="who"><b>CartPilot</b>{m.answeredBy && m.answeredBy !== 'claude' && <span className="who__alt"> · {m.answeredBy}</span>}</div>
                 <Markdown text={m.text} />
                 <Via events={m.events} />
               </div>

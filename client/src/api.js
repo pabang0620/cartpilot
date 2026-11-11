@@ -22,6 +22,9 @@ export const api = {
   checkout: (sessionId, cartId) => request('POST', '/api/checkout', { sessionId, cartId }),
   decide: (sessionId, approvalId, decision) => request('POST', `/api/approvals/${approvalId}`, { sessionId, decision }),
   ship: (sessionId, orderId) => request('POST', '/api/seller/ship', { sessionId, orderId }),
+  deliver: (sessionId, orderId, packageId) => request('POST', '/api/seller/deliver', { sessionId, orderId, packageId }),
+  lost: (sessionId, orderId, packageId) => request('POST', '/api/seller/lost', { sessionId, orderId, packageId }),
+  play: (sessionId, orderId) => request('POST', '/api/seller/play', { sessionId, orderId }),
 }
 
 const KEY = 'cartpilot.session'

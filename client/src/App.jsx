@@ -5,7 +5,7 @@ import CheckoutModal from './components/CheckoutModal.jsx'
 import JourneyPanel, { MiniSteps } from './components/JourneyPanel.jsx'
 import Icon from './components/Icons.jsx'
 
-const EMPTY_STATE = { budget: null, spent: 0, cart: null, orders: [], approvals: [], activity: [] }
+const EMPTY_STATE = { budget: null, spent: 0, charged: 0, cart: null, orders: [], approvals: [], activity: [] }
 
 const MODE_LABEL = { live: 'Live', sandbox: 'Sandbox', mock: 'Mock' }
 
@@ -25,6 +25,7 @@ export default function App() {
   const [sessionId, setSessionId] = useState(null)
   const [modes, setModes] = useState(null)
   const [testBuyer, setTestBuyer] = useState(null)
+  const [policy, setPolicy] = useState([])
   const [state, setState] = useState(EMPTY_STATE)
   const [messages, setMessages] = useState([])
   const [busy, setBusy] = useState(false)
@@ -52,6 +53,7 @@ export default function App() {
       const health = await api.health()
       setModes(health.modes)
       setTestBuyer(health.testBuyer || null)
+      setPolicy(health.merchantPolicy || [])
       let data = null
       let history = []
       if (stored?.sessionId) {
@@ -67,8 +69,8 @@ export default function App() {
       setState(data)
 
       if (params.get('paid')) {
-        history = [...history, { role: 'agent', text: `Payment approved on PayPal and captured for order **${params.get('paid')}**. Ask me to track it, refund it or file a claim any time.`, events: [{ tool: 'pay_order', source: 'paypal-agent-toolkit', ok: true }] }]
-        notify('Payment captured', 'success')
+        history = [...history, { role: 'agent', text: `Approved on PayPal for order **${params.get('paid')}**. The total is **on hold, not charged**. Each package is charged when it is delivered, and anything that never arrives is never charged.`, events: [{ tool: 'authorize_order', source: 'paypal-rest', ok: true }] }]
+        notify('Approved on PayPal: held, not charged', 'success')
       } else if (params.get('error')) {
         notify(params.get('error'), 'error')
       } else if (params.get('cancelled')) {
@@ -101,7 +103,7 @@ export default function App() {
     setBusy(true)
     try {
       const data = await api.chat(sessionId, text)
-      setMessages((m) => [...m, { role: 'agent', text: data.reply, events: data.events }])
+      setMessages((m) => [...m, { role: 'agent', text: data.reply, events: data.events, answeredBy: data.answeredBy }])
       setState(data.state)
       if (data.modes) setModes(data.modes)
     } catch (err) {
@@ -145,12 +147,29 @@ export default function App() {
     setState(next)
     const approval = next.approvals.find((a) => a.id === approvalId)
     if (approval?.status === 'failed') notify(approval.error, 'error')
-    else notify(decision === 'approve' ? 'Approved. PayPal call done.' : 'Rejected. Nothing was charged or refunded.', 'success')
+    else notify(decision === 'approve' ? 'Sent. The merchant policy approved it and PayPal is updated.' : 'Rejected. Nothing was sent to the merchant.', 'success')
   })
 
   const ship = (orderId) => withAction(async () => {
     setState(await api.ship(sessionId, orderId))
-    notify('Seller added tracking on PayPal')
+    notify('Merchant shipped the packages')
+  })
+
+  const lost = (orderId, packageId) => withAction(async () => {
+    setState(await api.lost(sessionId, orderId, packageId))
+    notify(`Carrier reported ${packageId} lost. It stays on hold and is not charged.`)
+  })
+
+  const play = (orderId) => withAction(async () => {
+    setState(await api.play(sessionId, orderId))
+    notify('Merchant shipped, two deliveries charged, the carrier lost the last package', 'success')
+  })
+
+  const deliver = (orderId, packageId) => withAction(async () => {
+    const next = await api.deliver(sessionId, orderId, packageId)
+    setState(next)
+    const pkg = next.orders.find((o) => o.orderId === orderId)?.packages.find((p) => p.id === packageId)
+    notify(`${packageId} delivered: PayPal charged $${pkg?.amount?.toFixed(2)} for it`, 'success')
   })
 
   return (
@@ -169,7 +188,7 @@ export default function App() {
       <MiniSteps state={state} />
 
       <main className="layout">
-        <ChatPanel testBuyer={testBuyer} messages={messages} busy={busy || !sessionId} onSend={send} activity={state.activity} hasPaid={state.orders.some((o) => o.captureId)} />
+        <ChatPanel testBuyer={testBuyer} messages={messages} busy={busy || !sessionId} onSend={send} activity={state.activity} hasPaid={state.orders.some((o) => o.authorizationId)} />
         <JourneyPanel
           state={state}
           busy={actionBusy}
@@ -177,6 +196,10 @@ export default function App() {
           onReview={() => { setCheckoutError(null); setShowCheckout(true) }}
           onDecide={decide}
           onShip={ship}
+          onDeliver={deliver}
+          onLost={lost}
+          onPlay={play}
+          policy={policy}
         />
       </main>
 

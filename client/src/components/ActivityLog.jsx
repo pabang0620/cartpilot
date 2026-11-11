@@ -1,6 +1,8 @@
 const SOURCE_LABEL = {
   channel3: 'CHANNEL3',
   'paypal-agent-toolkit': 'PAYPAL TOOLKIT',
+  'paypal-rest': 'PAYPAL REST',
+  merchant: 'MERCHANT',
   app: 'APP',
   human: 'YOU',
 }

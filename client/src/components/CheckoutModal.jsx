@@ -45,14 +45,14 @@ export default function CheckoutModal({ cart, budget, paypalMode, testBuyer, bus
               </tr>
             ))}
             <tr><td>Shipping</td><td>{usd(cart.shipping)}</td></tr>
-            <tr className="summary__total"><td>Total charged</td><td>{usd(cart.total)}</td></tr>
+            <tr className="summary__total"><td>Held on PayPal now</td><td>{usd(cart.total)}</td></tr>
             <tr><td>Your budget cap</td><td>{usd(budget)}</td></tr>
           </tbody>
         </table>
         <ul className="checklist">
-          <li>Prices come from Channel3, not from the AI.</li>
-          <li>You will log in and approve on {paypalMode === 'mock' ? 'a mock PayPal page' : 'PayPal Sandbox'}.</li>
-          <li>The payment is captured only after you approve.</li>
+          <li>Nothing is charged now. PayPal holds the total, and each package is charged only when it is delivered.</li>
+          <li>A package that never arrives is released from the hold, so you never pay for it.</li>
+          <li>Prices come from Channel3, not from the AI. You approve on {paypalMode === 'mock' ? 'a mock PayPal page' : 'PayPal Sandbox'}.</li>
         </ul>
         {testBuyer && (
           <div className="buyer">
@@ -65,7 +65,7 @@ export default function CheckoutModal({ cart, budget, paypalMode, testBuyer, bus
         <div className="modal__actions">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>Back</button>
           <button type="button" className="btn btn--paypal" ref={payRef} onClick={onConfirm} disabled={busy}>
-            {busy ? 'Creating PayPal order...' : `Pay ${usd(cart.total)} with PayPal`}
+            {busy ? 'Creating PayPal order...' : `Approve ${usd(cart.total)} hold with PayPal`}
           </button>
         </div>
       </div>

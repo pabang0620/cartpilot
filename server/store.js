@@ -63,15 +63,40 @@ export function addApproval(session, approval) {
   return item
 }
 
-// Net money already charged in this session (captured orders minus refunds).
+const OPEN_PACKAGE = new Set(['awaiting_shipment', 'in_transit'])
+
+// Cents per order: captured packages, packages still on hold, refunds.
+function orderCents(o) {
+  const packages = o.packages || []
+  const captured = packages.filter((p) => p.captureId).reduce((s, p) => s + Math.round(p.amount * 100), 0)
+  const held = o.authorizationStatus === 'VOIDED' ? 0 : packages.filter((p) => OPEN_PACKAGE.has(p.status)).reduce((s, p) => s + Math.round(p.amount * 100), 0)
+  const released = packages.filter((p) => p.status === 'released').reduce((s, p) => s + Math.round(p.amount * 100), 0)
+  const refunded = o.refunds.filter((r) => r.status !== 'FAILED').reduce((s, r) => s + Math.round(Number(r.amount) * 100), 0)
+  return { captured, held, released, refunded }
+}
+
+// Money committed in this session against the cap: charged (net of refunds) plus still on hold.
 export function spentAmount(session, excludeOrderId = null) {
   const cents = sessionOrders(session)
-    .filter((o) => o.captureId && o.orderId !== excludeOrderId)
+    .filter((o) => o.authorizationId && o.orderId !== excludeOrderId)
     .reduce((sum, o) => {
-      const refunded = o.refunds.filter((r) => r.status !== 'FAILED').reduce((s, r) => s + Number(r.amount), 0)
-      return sum + Math.round((o.total - refunded) * 100)
+      const c = orderCents(o)
+      return sum + c.captured + c.held - c.refunded
     }, 0)
   return cents / 100
+}
+
+// Money actually charged in this session (captured minus refunded).
+export function chargedTotal(session) {
+  return sessionOrders(session).reduce((sum, o) => {
+    const c = orderCents(o)
+    return sum + c.captured - c.refunded
+  }, 0) / 100
+}
+
+function withMoney(o) {
+  const c = orderCents(o)
+  return { ...o, money: { charged: (c.captured - c.refunded) / 100, held: c.held / 100, released: c.released / 100, refunded: c.refunded / 100 } }
 }
 
 export function publicState(session) {
@@ -79,8 +104,9 @@ export function publicState(session) {
     sessionId: session.id,
     budget: session.budget,
     spent: spentAmount(session),
+    charged: chargedTotal(session),
     cart: session.cart,
-    orders: sessionOrders(session),
+    orders: sessionOrders(session).map(withMoney),
     approvals: [...session.approvals.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     activity: session.activity,
   }

@@ -18,6 +18,13 @@ export function BudgetForm({ budget, onBudget }) {
   )
 }
 
+// Retailer images sometimes refuse to load; show the box icon instead of an empty frame.
+function ItemImage({ src }) {
+  const [broken, setBroken] = useState(false)
+  if (!src || broken) return <div className="item__ph"><Icon name="box" /></div>
+  return <img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setBroken(true)} />
+}
+
 export function BudgetMeter({ budget, spent, cart }) {
   if (budget == null) return null
   // The cap covers everything paid in this session plus the cart under review.
@@ -47,7 +54,7 @@ export default function CartCard({ budget, spent = 0, cart, onReview }) {
       <ul className="items">
         {cart.items.map((item) => (
           <li key={item.productId} className="item">
-            {item.image ? <img src={item.image} alt="" loading="lazy" /> : <div className="item__ph"><Icon name="box" /></div>}
+            <ItemImage src={item.image} />
             <div className="item__body">
               <a href={item.url} target="_blank" rel="noreferrer" className="item__title">{item.title}</a>
               <div className="muted small">{item.brand} · {item.quantity} x {usd(item.unitPrice)}</div>
@@ -64,7 +71,7 @@ export default function CartCard({ budget, spent = 0, cart, onReview }) {
       </dl>
       <BudgetMeter budget={budget} spent={spent} cart={cart} />
       {cart.status === 'paid' ? (
-        <div className="row approved-line"><span><Icon name="check" />Approved by you on <span className="pp">PayPal</span></span></div>
+        <div className="row approved-line"><span><Icon name="check" />Approved by you on <span className="pp">PayPal</span>: held, charged per delivered package</span></div>
       ) : (
         <button type="button" className="btn btn--paypal btn--block" disabled={over || budget == null} onClick={onReview}>
           {budget == null ? 'Set a budget to continue'

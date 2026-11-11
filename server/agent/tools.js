@@ -3,7 +3,8 @@ import { config, modes } from '../config.js'
 import { searchProducts, getProduct, summarizeProduct, bestOffer, offerPrice } from '../integrations/channel3.js'
 import { toolkitSchema, mockPaypal } from '../integrations/paypal.js'
 import { logActivity, sessionOrders, getSessionOrder, addApproval, spentAmount } from '../store.js'
-import { paypal, round2, refundableAmount, captureIds, compactOrder, reservedAmount, syncDisputes } from '../services.js'
+import { releaseEligibility } from '../merchant.js'
+import { paypal, round2, captureIds, compactOrder, reservedAmount, syncDisputes, packageRefundable, orderByCapture } from '../services.js'
 
 class ToolError extends Error {}
 
@@ -160,10 +161,10 @@ export const TOOLS = [
   {
     name: 'list_my_orders',
     source: 'app',
-    description: 'List this shopper\'s orders with status, capture id, refunds, tracking and disputes. Call this first for any after-purchase question.',
+    description: 'List this shopper\'s orders. Payment is authorized (held) on PayPal at checkout and each package is charged only when it is delivered, so every order shows charged_usd, on_hold_usd and released_usd, plus packages with status (awaiting_shipment, in_transit, delivered, released), tracking, estimated delivery and capture_id. Also returns approval_cards. Call this first for any after-purchase question.',
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
     async run(session) {
-      const cards = [...session.approvals.values()].map((a) => ({ type: a.type, order_id: a.orderId, amount_usd: a.amount, status: a.status }))
+      const cards = [...session.approvals.values()].map((a) => ({ type: a.type, order_id: a.orderId, package_id: a.packageId || null, amount_usd: a.amount, status: a.status }))
       return { orders: sessionOrders(session).filter((o) => o.status !== 'VOIDED').map(compactOrder), approval_cards: cards }
     },
   },
@@ -173,13 +174,24 @@ export const TOOLS = [
   }),
   fromToolkit('get_shipment_tracking', async (session, args) => {
     const captures = captureIds(session)
-    if (args.order_id) {
-      const order = requireOrder(session, args.order_id)
-      const { transaction_id: ignored, ...rest } = args
-      return paypal(session, 'get_shipment_tracking', order.captureId ? { ...rest, transaction_id: order.captureId } : rest)
+    if (args.transaction_id && !args.order_id) {
+      if (!captures.has(args.transaction_id)) throw new ToolError('Transaction does not belong to this shopper.')
+      return paypal(session, 'get_shipment_tracking', { transaction_id: args.transaction_id })
     }
-    if (!captures.has(args.transaction_id)) throw new ToolError('Transaction does not belong to this shopper.')
-    return paypal(session, 'get_shipment_tracking', args)
+    if (!args.order_id) throw new ToolError('Pass order_id (all packages) or the capture_id of a delivered package as transaction_id.')
+    const order = requireOrder(session, args.order_id)
+    // PayPal keeps trackers on captures, so delivered packages are read from PayPal and packages
+    // still in transit come from the merchant's shipment records.
+    const delivered = order.packages.filter((p) => p.captureId)
+    const paypalTrackers = []
+    for (const p of delivered) {
+      const result = await paypal(session, 'get_shipment_tracking', { transaction_id: p.captureId })
+      paypalTrackers.push({ package_id: p.id, trackers: result.trackers || result })
+    }
+    return {
+      packages: order.packages.map((p) => ({ package_id: p.id, item: p.title, status: p.status, carrier_reported_lost: !!p.lostAt, carrier: p.carrier, tracking_number: p.trackingNumber, estimated_delivery: p.eta, delivered_at: p.deliveredAt, charged: !!p.captureId })),
+      paypal_trackers: paypalTrackers,
+    }
   }),
   fromToolkit('get_refund', async (session, args) => {
     const owned = sessionOrders(session).some((o) => o.refunds.some((r) => r.refundId === args.refund_id))
@@ -203,73 +215,106 @@ export const TOOLS = [
     return dispute
   }),
   {
-    name: 'request_refund',
-    source: 'paypal-agent-toolkit',
-    description: 'Prepare a full or partial refund for a paid order. This only creates an approval card; the refund runs through PayPal (create_refund) after the shopper clicks Approve. For a partial refund, compute the amount from item prices in list_my_orders.',
+    name: 'report_missing_package',
+    source: 'app',
+    description: 'For a package that has not been delivered, prepare a request to the merchant to release it from the PayPal hold, so the shopper is never charged for it. The merchant policy releases a package only when the carrier reported it lost or its estimated delivery date has passed; before that this tool refuses and explains when it becomes eligible. This only creates an approval card; after the shopper approves, the merchant releases it and PayPal voids what is still held. Use this instead of a refund or a claim for items that never arrived.',
     input_schema: {
       type: 'object',
       properties: {
         order_id: { type: 'string' },
-        amount_usd: { type: 'number', description: 'Refund amount. Omit for the full refundable amount.' },
-        reason: { type: 'string', description: 'Short reason shown to the shopper and sent as note_to_payer.' },
+        package_id: { type: 'string', description: 'package_id from list_my_orders, e.g. PKG-3.' },
+        reason: { type: 'string', description: 'Short reason shown to the shopper and the merchant.' },
       },
-      required: ['order_id', 'reason'],
+      required: ['order_id', 'package_id', 'reason'],
       additionalProperties: false,
     },
-    async run(session, { order_id, amount_usd, reason }) {
+    async run(session, { order_id, package_id, reason }) {
       const order = requireOrder(session, order_id)
-      if (!order.captureId) throw new ToolError('Order is not paid yet, nothing to refund.')
-      const refundable = refundableAmount(order)
-      if (refundable <= 0) throw new ToolError('This order is already fully refunded.')
-      const reserved = reservedAmount(session, order)
+      const pkg = order.packages.find((p) => p.id === package_id)
+      if (!pkg) throw new ToolError(`No package ${package_id} on this order.`)
+      if (pkg.status === 'delivered') throw new ToolError(`${package_id} was delivered and charged. Use request_refund if it arrived damaged.`)
+      if (pkg.status === 'released') throw new ToolError(`${package_id} is already released. The shopper is not charged for it.`)
+      const check = releaseEligibility(pkg)
+      if (!check.ok) throw new ToolError(`Not eligible for release yet: ${check.reason} Until then it stays on hold and is not charged.`)
+      const waiting = [...session.approvals.values()].find((a) => a.type === 'release' && a.status === 'pending' && a.packageId === package_id)
+      if (waiting) throw new ToolError('A release card for this package is already waiting for the shopper.')
+      const approval = addApproval(session, { type: 'release', orderId: order.orderId, packageId: pkg.id, amount: pkg.amount, reason: reason.slice(0, 200), paypalTool: 'void_authorization' })
+      return { approval_id: approval.id, status: 'pending_shopper_approval', amount_not_charged_usd: pkg.amount, why_eligible: check.reason }
+    },
+  },
+  {
+    name: 'request_refund',
+    source: 'app',
+    description: 'Prepare a refund request to the merchant for a delivered (charged) package, for example when it arrived damaged. This only creates an approval card; after the shopper approves, the merchant policy approves refunds up to the package price and the merchant side runs PayPal create_refund on that package\'s capture. Omit amount_usd for the full package price.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        order_id: { type: 'string' },
+        package_id: { type: 'string', description: 'package_id of a delivered package from list_my_orders.' },
+        amount_usd: { type: 'number', description: 'Refund amount. Omit for the full refundable amount of the package.' },
+        reason: { type: 'string', description: 'Short reason shown to the shopper and sent as note_to_payer.' },
+      },
+      required: ['order_id', 'package_id', 'reason'],
+      additionalProperties: false,
+    },
+    async run(session, { order_id, package_id, amount_usd, reason }) {
+      const order = requireOrder(session, order_id)
+      const pkg = order.packages.find((p) => p.id === package_id)
+      if (!pkg) throw new ToolError(`No package ${package_id} on this order.`)
+      if (!pkg.captureId) throw new ToolError(`${package_id} was not delivered, so it was never charged. Use report_missing_package instead.`)
+      const refundable = packageRefundable(order, pkg)
+      if (refundable <= 0) throw new ToolError(`${package_id} is already fully refunded.`)
+      const reserved = reservedAmount(session, order, pkg.captureId)
       const available = round2(refundable - reserved.total)
       const held = [reserved.pendingRefunds ? `$${reserved.pendingRefunds} in a pending refund card` : '', reserved.openClaims ? `$${reserved.openClaims} in an open claim (resolve the claim instead of refunding twice)` : ''].filter(Boolean).join(' and ')
-      if (available <= 0) throw new ToolError(`Nothing left to refund: ${held}.`)
+      if (available <= 0) throw new ToolError(`Nothing left to refund on ${package_id}: ${held}.`)
       const amount = round2(amount_usd ?? available)
       if (!(amount > 0) || amount > available) throw new ToolError(`Refund must be between $0.01 and $${available}${held ? ` (${held})` : ''}.`)
-      const approval = addApproval(session, { type: 'refund', orderId: order.orderId, captureId: order.captureId, amount, reason: reason.slice(0, 200), paypalTool: 'create_refund' })
+      const approval = addApproval(session, { type: 'refund', orderId: order.orderId, packageId: pkg.id, captureId: pkg.captureId, amount, reason: reason.slice(0, 200), paypalTool: 'create_refund' })
       return { approval_id: approval.id, status: 'pending_shopper_approval', amount_usd: amount, refundable_usd: refundable }
     },
   },
   {
     name: 'open_claim',
     source: 'app',
-    description: 'Draft a PayPal buyer claim (dispute) for a paid order, for an item not received or not as described. In sandbox the shopper submits it in the PayPal Resolution Center; in mock mode it is filed directly. Afterwards use list_disputes to follow it.',
+    description: 'Last resort only, when the merchant refuses: draft a PayPal buyer claim (dispute) for a delivered (charged) package that is not as described. Items that never arrived are never charged, so use report_missing_package for them. In sandbox the shopper submits the claim in the PayPal Resolution Center; in mock mode it is filed directly. Afterwards use list_disputes to follow it.',
     input_schema: {
       type: 'object',
       properties: {
         order_id: { type: 'string' },
-        reason: { type: 'string', enum: ['MERCHANDISE_OR_SERVICE_NOT_RECEIVED', 'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED'] },
-        amount_usd: { type: 'number', description: 'Disputed amount (usually the affected items).' },
+        package_id: { type: 'string' },
+        reason: { type: 'string', enum: ['MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED', 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED'] },
+        amount_usd: { type: 'number', description: 'Disputed amount (at most the package price).' },
         message: { type: 'string', description: 'Claim message written for the shopper, factual and short.' },
       },
-      required: ['order_id', 'reason', 'amount_usd', 'message'],
+      required: ['order_id', 'package_id', 'reason', 'amount_usd', 'message'],
       additionalProperties: false,
     },
-    async run(session, { order_id, reason, amount_usd, message }) {
+    async run(session, { order_id, package_id, reason, amount_usd, message }) {
       const order = requireOrder(session, order_id)
-      if (!order.captureId) throw new ToolError('Order is not paid yet.')
-      const refundable = refundableAmount(order)
-      if (refundable <= 0) throw new ToolError('This order is already fully refunded, there is nothing to claim.')
-      const reserved = reservedAmount(session, order)
+      const pkg = order.packages.find((p) => p.id === package_id)
+      if (!pkg) throw new ToolError(`No package ${package_id} on this order.`)
+      if (!pkg.captureId) throw new ToolError(`${package_id} was never charged, so there is nothing to claim. Use report_missing_package.`)
+      const refundable = packageRefundable(order, pkg)
+      const reserved = reservedAmount(session, order, pkg.captureId)
       const available = round2(refundable - reserved.total)
-      if (available <= 0) throw new ToolError(`Nothing left to claim: $${reserved.openClaims} is already in an open claim and $${reserved.pendingRefunds} in pending refund cards.`)
+      if (available <= 0) throw new ToolError(`Nothing left to claim on ${package_id}.`)
       const amount = round2(amount_usd)
       if (!(amount > 0) || amount > available) throw new ToolError(`Claim amount must be between $0.01 and $${available}.`)
-      order.claimDraft = { reason, amount, message: message.slice(0, 1000), createdAt: new Date().toISOString() }
+      order.claimDraft = { packageId: pkg.id, reason, amount, message: message.slice(0, 1000), createdAt: new Date().toISOString() }
       if (modes.paypal === 'mock') {
-        const dispute = mockPaypal.openDispute({ captureId: order.captureId, amount, reason, message: order.claimDraft.message })
-        order.disputes.push({ disputeId: dispute.dispute_id, status: dispute.status, reason, amount })
+        const dispute = mockPaypal.openDispute({ captureId: pkg.captureId, amount, reason, message: order.claimDraft.message })
+        order.disputes.push({ disputeId: dispute.dispute_id, captureId: pkg.captureId, status: dispute.status, reason, amount })
         logActivity(session, { source: 'paypal-agent-toolkit', tool: 'buyer_opens_dispute (mock)', origin: 'agent', ok: true })
         return { filed: true, dispute_id: dispute.dispute_id, status: dispute.status }
       }
-      return { filed: false, resolution_center_url: SANDBOX_RESOLUTION_CENTER, capture_id: order.captureId, draft: order.claimDraft, next_step: 'Shopper pastes the draft in the PayPal Resolution Center. Then call list_disputes.' }
+      return { filed: false, resolution_center_url: SANDBOX_RESOLUTION_CENTER, capture_id: pkg.captureId, draft: order.claimDraft, next_step: 'Shopper pastes the draft in the PayPal Resolution Center. Then call list_disputes.' }
     },
   },
   {
     name: 'request_dispute_resolution',
-    source: 'paypal-agent-toolkit',
-    description: 'Resolve an open dispute in the shopper\'s favour by accepting the claim (refund). This only creates an approval card; PayPal accept_dispute_claim runs after the shopper clicks Approve.',
+    source: 'app',
+    description: 'Ask the merchant to settle an open dispute in the shopper\'s favour. This only creates an approval card; after the shopper approves, the merchant policy accepts the claim with PayPal accept_dispute_claim.',
     input_schema: {
       type: 'object',
       properties: {
@@ -285,10 +330,10 @@ export const TOOLS = [
       const txn = (dispute.disputed_transactions || []).find((t) => captures.has(t.seller_transaction_id))
       if (!txn) throw new ToolError('Dispute does not belong to this shopper.')
       if (dispute.status === 'RESOLVED') throw new ToolError('Dispute is already resolved.')
-      const order = sessionOrders(session).find((o) => o.captureId === txn.seller_transaction_id)
+      const order = orderByCapture(session, txn.seller_transaction_id)
       const waiting = [...session.approvals.values()].find((a) => a.type === 'dispute_accept' && a.status === 'pending' && a.disputeId === dispute_id)
       if (waiting) throw new ToolError('A card to settle this claim is already waiting for the shopper. Ask them to approve or reject it.')
-      const approval = addApproval(session, { type: 'dispute_accept', orderId: order.orderId, disputeId: dispute_id, amount: Number(dispute.dispute_amount?.value || 0), reason: note.slice(0, 200), paypalTool: 'accept_dispute_claim' })
+      const approval = addApproval(session, { type: 'dispute_accept', orderId: order.orderId, captureId: txn.seller_transaction_id, disputeId: dispute_id, amount: Number(dispute.dispute_amount?.value || 0), reason: note.slice(0, 200), paypalTool: 'accept_dispute_claim' })
       return { approval_id: approval.id, status: 'pending_shopper_approval' }
     },
   },
@@ -306,7 +351,7 @@ export async function runTool(session, name, input) {
   if (!tool) return { ok: false, source: 'app', result: { error: `Unknown tool ${name}` } }
   try {
     const result = await tool.run(session, input || {})
-    if (tool.source !== 'paypal-agent-toolkit' || name.startsWith('request_')) {
+    if (tool.source !== 'paypal-agent-toolkit') {
       logActivity(session, { source: tool.source, tool: name, origin: 'agent', ok: true })
     }
     return { ok: true, source: tool.source, result }
